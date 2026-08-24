@@ -1,0 +1,12 @@
+node_modules/
+.env
+
+BACKEND/node_modules/
+BACKEND/.env
+
+FRONTEND/node_modules/
+FRONTEND/.env
+
+dist/
+build/
+coverage/
