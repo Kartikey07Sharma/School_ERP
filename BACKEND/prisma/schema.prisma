@@ -1,13 +1,85 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
-
-// Get a free hosted Postgres database in seconds: `npx create-db`
-
 generator client {
-  provider = "prisma-client"
-  output   = "../src/generated/prisma"
+  provider = "prisma-client-js"
 }
 
 datasource db {
   provider = "postgresql"
+}
+
+enum InstitutionType {
+  SCHOOL
+  COLLEGE
+}
+
+enum SchoolStatus {
+  ACTIVE
+  INACTIVE
+  SUSPENDED
+}
+
+enum UserRole {
+  SUPER_ADMIN
+  SCHOOL_ADMIN
+  TEACHER
+  STUDENT
+  PARENT
+}
+
+enum UserStatus {
+  ACTIVE
+  INACTIVE
+}
+
+model School {
+  id              String          @id @default(uuid())
+
+  name            String
+  code            String          @unique
+
+  email           String          @unique
+  phone           String          @unique
+
+  address         String?
+  logoUrl         String?
+
+  institutionType InstitutionType
+
+  status          SchoolStatus    @default(ACTIVE)
+
+  users           User[]
+
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+
+  @@index([code])
+  @@index([email])
+
+  @@map("schools")
+}
+
+model User {
+  id          String      @id @default(uuid())
+
+  firstName   String
+  lastName    String?
+
+  email       String      @unique
+  phone       String?     @unique
+
+  password    String
+
+  role        UserRole
+
+  status      UserStatus  @default(ACTIVE)
+
+  schoolId    String
+
+  school      School      @relation(fields: [schoolId], references: [id])
+
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+
+  @@index([schoolId])
+
+  @@map("users")
 }
