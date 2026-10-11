@@ -1,9 +1,11 @@
-require("dotenv").config();
-
+const env = require("./config/env");
 const app = require("./app");
 const prisma = require("./database/prisma");
-
-const PORT = process.env.PORT || 5000;
+const redis = require("./database/redis");
+const { closeQueues } = require("./queues");
+const PORT = env.PORT;
+let server;
+let shuttingDown = false;
 
 /**
  * Start Server
@@ -12,66 +14,50 @@ const startServer = async () => {
   try {
     await prisma.$connect();
 
-    console.log(" Database Connected Successfully");
+    console.info("PostgreSQL connection ready");
+    await redis.connectRedis();
 
-    const server = app.listen(PORT, () => {
-      console.log(
-        ` Server running on http://localhost:${PORT}`
-      );
+    server = app.listen(PORT, () => {
+      console.info(`HTTP server listening on port ${PORT}`);
     });
-
-    /**
-     * Unhandled Promise Rejection
-     */
-    process.on("unhandledRejection", (err) => {
-      console.error(
-        " Unhandled Rejection:",
-        err.message
-      );
-
-      server.close(() => {
-        process.exit(1);
-      });
-    });
-
-    /**
-     * Graceful Shutdown
-     */
-    process.on("SIGINT", async () => {
-      console.log(
-        "\n Shutting down server..."
-      );
-
-      await prisma.$disconnect();
-
-      server.close(() => {
-        console.log(
-          " Server closed successfully"
-        );
-        process.exit(0);
-      });
-    });
-
   } catch (error) {
-    console.error(
-      " Failed to start server:",
-      error.message
-    );
-
-    process.exit(1);
+    console.error("Application startup failed; check service configuration and availability");
+    await shutdown(1);
   }
 };
 
-startServer();
+function closeHttpServer() {
+  if (!server) return Promise.resolve();
+  return new Promise((resolve, reject) => {
+    server.close((error) => error ? reject(error) : resolve());
+  });
+}
 
-/**
- * Uncaught Exception
- */
-process.on("uncaughtException", (err) => {
-  console.error(
-    " Uncaught Exception:",
-    err.message
-  );
+async function shutdown(exitCode = 0) {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  console.info("Shutting down application");
+  const steps = [closeHttpServer, closeQueues, redis.closeRedis, () => prisma.$disconnect()];
+  for (const close of steps) {
+    try {
+      await close();
+    } catch {
+      console.error("A service did not close cleanly");
+      exitCode = 1;
+    }
+  }
+  process.exitCode = exitCode;
+}
 
-  process.exit(1);
+process.once("SIGINT", () => void shutdown());
+process.once("SIGTERM", () => void shutdown());
+process.on("unhandledRejection", () => {
+  console.error("Unhandled asynchronous error");
+  void shutdown(1);
 });
+process.once("uncaughtException", () => {
+  console.error("Uncaught application error");
+  void shutdown(1);
+});
+
+void startServer();

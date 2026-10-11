@@ -6,7 +6,7 @@ const userService = require("../services/user.service");
  */
 const createUser = async (req, res, next) => {
   try {
-    const user = await userService.createUser(req.body);
+    const user = await userService.createUser(req.body, req.user);
 
     res.status(201).json({
       success: true,
@@ -24,7 +24,7 @@ const createUser = async (req, res, next) => {
  */
 const getUserById = async (req, res, next) => {
   try {
-    const user = await userService.getUserById(req.params.id);
+    const user = await userService.getUserById(req.params.id, req.user);
 
     res.status(200).json({
       success: true,
@@ -42,7 +42,8 @@ const getUserById = async (req, res, next) => {
 const getUserByEmail = async (req, res, next) => {
   try {
     const user = await userService.getUserByEmail(
-      req.params.email
+      req.params.email,
+      req.user
     );
 
     res.status(200).json({
@@ -60,7 +61,7 @@ const getUserByEmail = async (req, res, next) => {
  */
 const getAllUsers = async (req, res, next) => {
   try {
-    const users = await userService.getAllUsers();
+    const users = await userService.getAllUsers(req.user);
 
     res.status(200).json({
       success: true,
@@ -79,7 +80,8 @@ const getAllUsers = async (req, res, next) => {
 const getUsersBySchool = async (req, res, next) => {
   try {
     const users = await userService.getUsersBySchool(
-      req.params.schoolId
+      req.params.schoolId,
+      req.user
     );
 
     res.status(200).json({
@@ -100,7 +102,8 @@ const updateUser = async (req, res, next) => {
   try {
     const user = await userService.updateUser(
       req.params.id,
-      req.body
+      req.body,
+      req.user
     );
 
     res.status(200).json({
@@ -121,7 +124,8 @@ const changeUserStatus = async (req, res, next) => {
   try {
     const user = await userService.changeUserStatus(
       req.params.id,
-      req.body.status
+      req.body.status,
+      req.user
     );
 
     res.status(200).json({
@@ -140,7 +144,7 @@ const changeUserStatus = async (req, res, next) => {
  */
 const deleteUser = async (req, res, next) => {
   try {
-    await userService.deleteUser(req.params.id);
+    await userService.deleteUser(req.params.id, req.user);
 
     res.status(200).json({
       success: true,

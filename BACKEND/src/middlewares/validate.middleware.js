@@ -5,7 +5,15 @@ const validate = (schema) => {
     if (!result.success) {
       return res.status(400).json({
         success: false,
-        errors: result.error.issues,
+        error: {
+          code: "VALIDATION_ERROR",
+          message: "Request validation failed",
+          details: result.error.issues.map(({ path, message, code }) => ({
+            path: path.map(String),
+            message,
+            code,
+          })),
+        },
       });
     }
 

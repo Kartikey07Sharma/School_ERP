@@ -61,11 +61,16 @@ const updateSchool = async (id, updateData) => {
  * Change School Status
  */
 const changeSchoolStatus = async (id, status) => {
-  return prisma.school.update({
-    where: { id },
-    data: {
-      status,
-    },
+  return prisma.$transaction(async (transaction) => {
+    const school = await transaction.school.update({
+      where: { id },
+      data: { status },
+    });
+    await transaction.user.updateMany({
+      where: { schoolId: id },
+      data: { authVersion: { increment: 1 } },
+    });
+    return school;
   });
 };
 

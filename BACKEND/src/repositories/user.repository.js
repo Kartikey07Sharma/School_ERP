@@ -1,122 +1,72 @@
-const prisma = require("../database/prisma");
+const prisma = () => require("../database/prisma");
 
-/**
- * Create User
- */
-const createUser = async (userData) => {
-  return prisma.user.create({
-    data: userData,
-  });
-};
+const PUBLIC_USER_SELECT = Object.freeze({
+  id: true,
+  firstName: true,
+  lastName: true,
+  email: true,
+  phone: true,
+  role: true,
+  status: true,
+  schoolId: true,
+  createdAt: true,
+  updatedAt: true,
+});
 
-/**
- * Find User By ID
- */
-const findUserById = async (id) => {
-  return prisma.user.findUnique({
-    where: { id },
-    include: {
-      school: true,
-    },
-  });
-};
+function scopeWhere(actor) {
+  if (actor.role === "SUPER_ADMIN") return {};
+  if (!actor.schoolId) return { schoolId: "__no_tenant__" };
+  return { schoolId: actor.schoolId };
+}
 
-/**
- * Find User By Email
- */
-const findUserByEmail = async (email) => {
-  return prisma.user.findUnique({
-    where: { email },
-  });
-};
+const createUser = (userData) => prisma().user.create({ data: userData, select: PUBLIC_USER_SELECT });
 
-/**
- * Find User By Phone
- */
-const findUserByPhone = async (phone) => {
-  return prisma.user.findUnique({
-    where: { phone },
-  });
-};
+const findUserById = (id, actor) => prisma().user.findFirst({
+  where: { id, ...scopeWhere(actor) },
+  select: PUBLIC_USER_SELECT,
+});
 
-/**
- * Find All Users
- */
-const findAllUsers = async () => {
-  return prisma.user.findMany({
-    include: {
-      school: true,
-    },
-    orderBy: {
-      createdAt: "desc",
-    },
-  });
-};
+const findUserByEmail = (email, actor) => prisma().user.findFirst({
+  where: { email, ...scopeWhere(actor) },
+  select: PUBLIC_USER_SELECT,
+});
 
-/**
- * Find Users By School
- */
-const findUsersBySchool = async (schoolId) => {
-  return prisma.user.findMany({
-    where: {
-      schoolId,
-    },
-    orderBy: {
-      createdAt: "desc",
-    },
-  });
-};
+const findAllUsers = (actor) => prisma().user.findMany({
+  where: scopeWhere(actor),
+  select: PUBLIC_USER_SELECT,
+  orderBy: { createdAt: "desc" },
+});
 
-/**
- * Find Users By Role
- */
-const findUsersByRole = async (role) => {
-  return prisma.user.findMany({
-    where: {
-      role,
-    },
-  });
-};
+const findUsersBySchool = (schoolId, actor) => prisma().user.findMany({
+  where: {
+    schoolId: actor.role === "SUPER_ADMIN" ? schoolId : actor.schoolId,
+  },
+  select: PUBLIC_USER_SELECT,
+  orderBy: { createdAt: "desc" },
+});
 
-/**
- * Update User
- */
-const updateUser = async (id, updateData) => {
-  return prisma.user.update({
-    where: { id },
-    data: updateData,
-  });
-};
+const updateUser = (id, updateData) => prisma().user.update({
+  where: { id },
+  data: updateData,
+  select: PUBLIC_USER_SELECT,
+});
 
-/**
- * Change User Status
- */
-const changeUserStatus = async (id, status) => {
-  return prisma.user.update({
-    where: { id },
-    data: {
-      status,
-    },
-  });
-};
+const changeUserStatus = (id, status) => prisma().user.update({
+  where: { id },
+  data: { status, authVersion: { increment: 1 } },
+  select: PUBLIC_USER_SELECT,
+});
 
-/**
- * Delete User
- */
-const deleteUser = async (id) => {
-  return prisma.user.delete({
-    where: { id },
-  });
-};
+const deleteUser = (id) => changeUserStatus(id, "INACTIVE");
 
 module.exports = {
+  PUBLIC_USER_SELECT,
+  scopeWhere,
   createUser,
   findUserById,
   findUserByEmail,
-  findUserByPhone,
   findAllUsers,
   findUsersBySchool,
-  findUsersByRole,
   updateUser,
   changeUserStatus,
   deleteUser,

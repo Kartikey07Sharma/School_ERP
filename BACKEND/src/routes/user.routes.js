@@ -3,6 +3,7 @@ const express = require("express");
 const userController = require("../controllers/user.controller");
 
 const validate = require("../middlewares/validate.middleware");
+const { requireAuth, authorizePermission } = require("../middlewares/auth.middleware");
 
 const {
   createUserSchema,
@@ -12,12 +13,15 @@ const {
 
 const router = express.Router();
 
+router.use(requireAuth);
+
 /**
  * Create User
  * POST /api/users
  */
 router.post(
   "/",
+  authorizePermission("users:create:school-members"),
   validate(createUserSchema),
   userController.createUser
 );
@@ -28,6 +32,7 @@ router.post(
  */
 router.get(
   "/",
+  authorizePermission("users:read:any", "users:read:school"),
   userController.getAllUsers
 );
 
@@ -37,6 +42,7 @@ router.get(
  */
 router.get(
   "/school/:schoolId",
+  authorizePermission("users:read:any", "users:read:school"),
   userController.getUsersBySchool
 );
 
@@ -46,6 +52,7 @@ router.get(
  */
 router.get(
   "/email/:email",
+  authorizePermission("users:read:any", "users:read:school"),
   userController.getUserByEmail
 );
 
@@ -55,6 +62,7 @@ router.get(
  */
 router.get(
   "/:id",
+  authorizePermission("users:read:any", "users:read:school"),
   userController.getUserById
 );
 
@@ -64,6 +72,7 @@ router.get(
  */
 router.put(
   "/:id",
+  authorizePermission("users:update:any", "users:update:school-members"),
   validate(updateUserSchema),
   userController.updateUser
 );
@@ -74,6 +83,7 @@ router.put(
  */
 router.patch(
   "/:id/status",
+  authorizePermission("users:status:any", "users:status:school-members"),
   validate(changeUserStatusSchema),
   userController.changeUserStatus
 );
@@ -84,6 +94,7 @@ router.patch(
  */
 router.delete(
   "/:id",
+  authorizePermission("users:deactivate:any", "users:deactivate:school-members"),
   userController.deleteUser
 );
 

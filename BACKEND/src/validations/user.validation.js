@@ -3,8 +3,7 @@ const { z } = require("zod");
 /**
  * User Roles
  */
-const UserRoleEnum = z.enum([
-  "SUPER_ADMIN",
+const ManagedUserRoleEnum = z.enum([
   "SCHOOL_ADMIN",
   "TEACHER",
   "STUDENT",
@@ -47,16 +46,14 @@ const createUserSchema = z.object({
     .max(15, "Phone number cannot exceed 15 digits")
     .optional(),
 
-  password: z
-    .string()
-    .min(6, "Password must be at least 6 characters")
-    .max(100, "Password cannot exceed 100 characters"),
+  password: z.string().min(12).max(72).refine(
+    (value) => Buffer.byteLength(value, "utf8") <= 72,
+    "Password must be at most 72 bytes",
+  ),
 
-  role: UserRoleEnum,
+  role: ManagedUserRoleEnum,
 
-  schoolId: z
-    .string()
-    .uuid("Invalid school ID"),
+  schoolId: z.string().uuid("Invalid school ID").optional(),
 });
 
 /**
@@ -89,10 +86,7 @@ const updateUserSchema = z.object({
     .max(15)
     .optional(),
 
-  role: UserRoleEnum.optional(),
-
-  status: UserStatusEnum.optional(),
-});
+}).strict().refine((value) => Object.keys(value).length > 0, "At least one profile field is required");
 
 /**
  * Change User Status Validation
@@ -105,4 +99,5 @@ module.exports = {
   createUserSchema,
   updateUserSchema,
   changeUserStatusSchema,
+  ManagedUserRoleEnum,
 };

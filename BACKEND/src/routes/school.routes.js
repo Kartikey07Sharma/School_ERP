@@ -9,12 +9,17 @@ const schoolController = require(
 const validate = require(
   "../middlewares/validate.middleware"
 );
+const { requireAuth, authorizePermission } = require("../middlewares/auth.middleware");
 
 const {
   createSchoolSchema,
+  updateSchoolSchema,
+  changeSchoolStatusSchema,
 } = require(
   "../validations/school.validation"
 );
+
+router.use(requireAuth, authorizePermission("schools:manage"));
 
 /**
  * Create School
@@ -46,6 +51,7 @@ router.get(
  */
 router.patch(
   "/:id",
+  validate(updateSchoolSchema),
   schoolController.updateSchool
 );
 
@@ -54,6 +60,7 @@ router.patch(
  */
 router.patch(
   "/:id/status",
+  validate(changeSchoolStatusSchema),
   schoolController.changeSchoolStatus
 );
 
