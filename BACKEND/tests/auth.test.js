@@ -342,3 +342,130 @@ test("rate limit middleware rejects a denied Redis decision", async () => {
   assert.equal(nextError.code, "RATE_LIMITED");
   assert.equal(nextError.statusCode, 429);
 });
+
+
+test("user mutation methods preserve tenant authorization", async (t) => {
+  const actor = {
+    id: "admin-a",
+    role: "SCHOOL_ADMIN",
+    schoolId: "school-a",
+  };
+
+  const target = {
+    id: "member-a",
+    role: "TEACHER",
+    schoolId: "school-a",
+  };
+
+  const calls = [];
+
+  const service = createUserService({
+    users: {
+      findUserById: async (id, authenticatedActor) => {
+        calls.push({ method: "findUserById", id, authenticatedActor });
+        return target;
+      },
+      updateUser: async (...args) => {
+        calls.push({ method: "updateUser", args });
+        return target;
+      },
+      changeUserStatus: async (...args) => {
+        calls.push({ method: "changeUserStatus", args });
+        return target;
+      },
+      deleteUser: async (...args) => {
+        calls.push({ method: "deleteUser", args });
+        return target;
+      },
+    },
+  });
+
+  await t.test("updateUser passes actor and whitelists profile fields", async () => {
+    calls.length = 0;
+
+    await service.updateUser("member-a", {
+      firstName: "Updated",
+      lastName: "Teacher",
+      email: "  TEACHER@EXAMPLE.TEST ",
+      phone: "1234567890",
+      role: "SUPER_ADMIN",
+      schoolId: "school-b",
+      status: "INACTIVE",
+    }, actor);
+
+    const mutation = calls.find((call) => call.method === "updateUser");
+
+    assert.ok(mutation, "updateUser should be called");
+    assert.equal(mutation.args[0], "member-a");
+    assert.deepEqual(mutation.args[1], {
+      firstName: "Updated",
+      lastName: "Teacher",
+      email: "teacher@example.test",
+      phone: "1234567890",
+    });
+    assert.equal(mutation.args[2], actor);
+  });
+
+  await t.test("changeUserStatus passes actor to repository", async () => {
+    calls.length = 0;
+
+    await service.changeUserStatus("member-a", "INACTIVE", actor);
+
+    const mutation = calls.find(
+      (call) => call.method === "changeUserStatus"
+    );
+
+    assert.ok(mutation, "changeUserStatus should be called");
+    assert.equal(mutation.args[0], "member-a");
+    assert.equal(mutation.args[1], "INACTIVE");
+    assert.equal(mutation.args[2], actor);
+  });
+
+  await t.test("deleteUser passes actor to repository", async () => {
+    calls.length = 0;
+
+    await service.deleteUser("member-a", actor);
+
+    const mutation = calls.find((call) => call.method === "deleteUser");
+
+    assert.ok(mutation, "deleteUser should be called");
+    assert.equal(mutation.args[0], "member-a");
+    assert.equal(mutation.args[1], actor);
+  });
+});
+
+test("school administrators cannot mutate users outside their tenant", async () => {
+  const actor = {
+    id: "admin-a",
+    role: "SCHOOL_ADMIN",
+    schoolId: "school-a",
+  };
+
+  let mutationCalls = 0;
+
+  const service = createUserService({
+    users: {
+      findUserById: async () => null,
+      updateUser: async () => { mutationCalls++; },
+      changeUserStatus: async () => { mutationCalls++; },
+      deleteUser: async () => { mutationCalls++; },
+    },
+  });
+
+  await assert.rejects(
+    service.updateUser("member-from-school-b", { firstName: "Changed" }, actor),
+    { statusCode: 404 }
+  );
+
+  await assert.rejects(
+    service.changeUserStatus("member-from-school-b", "INACTIVE", actor),
+    { statusCode: 404 }
+  );
+
+  await assert.rejects(
+    service.deleteUser("member-from-school-b", actor),
+    { statusCode: 404 }
+  );
+
+  assert.equal(mutationCalls, 0, "No mutation should run for an inaccessible user");
+});

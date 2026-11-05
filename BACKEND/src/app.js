@@ -5,6 +5,7 @@ const env = require("./config/env");
 const schoolRoutes = require("./routes/school.routes");
 const userRoutes = require("./routes/user.routes");
 const authRoutes = require("./routes/auth.routes");
+const studentRoutes = require("./routes/student.routes");
 
 const errorMiddleware = require(
   "./middlewares/error.middleware"
@@ -66,6 +67,11 @@ app.use(
 app.use(
   "/api/v1/users",
   userRoutes
+);
+
+app.use(
+  "/api/v1/students",
+  studentRoutes
 );
 
 /**

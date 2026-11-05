@@ -1,0 +1,121 @@
+﻿const test = require("node:test");
+const assert = require("node:assert/strict");
+
+const prismaPath = require.resolve("../src/database/prisma");
+const repositoryPath = require.resolve("../src/repositories/user.repository");
+
+function loadRepositoryWithMockPrisma() {
+  const calls = [];
+  const fakePrisma = {
+    user: {
+      update: async (args) => {
+        calls.push(args);
+        return { id: args.where.id };
+      },
+    },
+  };
+
+  const originalPrismaModule = require.cache[prismaPath];
+  require.cache[prismaPath] = {
+    id: prismaPath,
+    filename: prismaPath,
+    loaded: true,
+    exports: fakePrisma,
+    children: [],
+    paths: [],
+  };
+
+  delete require.cache[repositoryPath];
+
+  try {
+    const repository = require(repositoryPath);
+    return { repository, calls };
+  } finally {
+    delete require.cache[repositoryPath];
+
+    if (originalPrismaModule) {
+      require.cache[prismaPath] = originalPrismaModule;
+    } else {
+      delete require.cache[prismaPath];
+    }
+  }
+}
+
+test("repository mutation queries enforce tenant scope", async (t) => {
+  await t.test("school admin update includes schoolId", async () => {
+    const { repository, calls } = loadRepositoryWithMockPrisma();
+
+    await repository.updateUser(
+      "user-1",
+      { firstName: "Updated" },
+      { role: "SCHOOL_ADMIN", schoolId: "school-a" }
+    );
+
+    assert.deepEqual(calls[0].where, {
+      id: "user-1",
+      schoolId: "school-a",
+    });
+  });
+
+  await t.test("school admin status change includes schoolId and increments authVersion", async () => {
+    const { repository, calls } = loadRepositoryWithMockPrisma();
+
+    await repository.changeUserStatus(
+      "user-1",
+      "INACTIVE",
+      { role: "SCHOOL_ADMIN", schoolId: "school-a" }
+    );
+
+    assert.deepEqual(calls[0].where, {
+      id: "user-1",
+      schoolId: "school-a",
+    });
+    assert.deepEqual(calls[0].data, {
+      status: "INACTIVE",
+      authVersion: { increment: 1 },
+    });
+  });
+
+  await t.test("delete is a scoped soft delete", async () => {
+    const { repository, calls } = loadRepositoryWithMockPrisma();
+
+    await repository.deleteUser(
+      "user-1",
+      { role: "SCHOOL_ADMIN", schoolId: "school-a" }
+    );
+
+    assert.deepEqual(calls[0].where, {
+      id: "user-1",
+      schoolId: "school-a",
+    });
+    assert.equal(calls[0].data.status, "INACTIVE");
+    assert.deepEqual(calls[0].data.authVersion, { increment: 1 });
+  });
+
+  await t.test("super admin is not restricted to one school", async () => {
+    const { repository, calls } = loadRepositoryWithMockPrisma();
+
+    await repository.updateUser(
+      "user-1",
+      { firstName: "Updated" },
+      { role: "SUPER_ADMIN", schoolId: null }
+    );
+
+    assert.deepEqual(calls[0].where, { id: "user-1" });
+  });
+
+  await t.test("actor without schoolId cannot target another tenant", async () => {
+    const { repository, calls } = loadRepositoryWithMockPrisma();
+
+    await repository.updateUser(
+      "user-1",
+      { firstName: "Updated" },
+      { role: "SCHOOL_ADMIN", schoolId: null }
+    );
+
+    assert.deepEqual(calls[0].where, {
+      id: "user-1",
+      schoolId: "__no_tenant__",
+    });
+  });
+});

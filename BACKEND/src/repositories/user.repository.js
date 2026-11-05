@@ -45,19 +45,22 @@ const findUsersBySchool = (schoolId, actor) => prisma().user.findMany({
   orderBy: { createdAt: "desc" },
 });
 
-const updateUser = (id, updateData) => prisma().user.update({
-  where: { id },
-  data: updateData,
-  select: PUBLIC_USER_SELECT,
-});
+const updateUser = (id, updateData, actor) =>
+  prisma().user.update({
+    where: { id, ...scopeWhere(actor) },
+    data: updateData,
+    select: PUBLIC_USER_SELECT,
+  });
 
-const changeUserStatus = (id, status) => prisma().user.update({
-  where: { id },
-  data: { status, authVersion: { increment: 1 } },
-  select: PUBLIC_USER_SELECT,
-});
+const changeUserStatus = (id, status, actor) =>
+  prisma().user.update({
+    where: { id, ...scopeWhere(actor) },
+    data: { status, authVersion: { increment: 1 } },
+    select: PUBLIC_USER_SELECT,
+  });
 
-const deleteUser = (id) => changeUserStatus(id, "INACTIVE");
+const deleteUser = (id, actor) =>
+  changeUserStatus(id, "INACTIVE", actor);
 
 module.exports = {
   PUBLIC_USER_SELECT,

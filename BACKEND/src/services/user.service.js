@@ -90,9 +90,13 @@ function createUserService({ users: suppliedUsers, schools: suppliedSchools, bcr
       throw new AppError("School administrators cannot manage another administrator", 403, "FORBIDDEN");
     }
     return users().updateUser(id, {
-      ...updateData,
-      ...(updateData.email ? { email: updateData.email.trim().toLowerCase() } : {}),
-    });
+      firstName: updateData.firstName,
+      lastName: updateData.lastName,
+      email: updateData.email
+        ? updateData.email.trim().toLowerCase()
+        : undefined,
+      phone: updateData.phone,
+    }, actor);
   }
 
   async function changeUserStatus(id, status, actor) {
@@ -102,7 +106,7 @@ function createUserService({ users: suppliedUsers, schools: suppliedSchools, bcr
     if (actor.role === ROLE.SCHOOL_ADMIN && existing.role === ROLE.SCHOOL_ADMIN) {
       throw new AppError("School administrators cannot manage another administrator", 403, "FORBIDDEN");
     }
-    return users().changeUserStatus(id, status);
+    return users().changeUserStatus(id, status, actor);
   }
 
   async function deleteUser(id, actor) {
@@ -112,7 +116,7 @@ function createUserService({ users: suppliedUsers, schools: suppliedSchools, bcr
     if (actor.role === ROLE.SCHOOL_ADMIN && existing.role === ROLE.SCHOOL_ADMIN) {
       throw new AppError("School administrators cannot manage another administrator", 403, "FORBIDDEN");
     }
-    return users().deleteUser(id);
+    return users().deleteUser(id, actor);
   }
 
   return { createUser, getUserById, getUserByEmail, getAllUsers, getUsersBySchool, updateUser, changeUserStatus, deleteUser };

@@ -35,8 +35,10 @@ async function main() {
 }
 
 main()
-  .catch(() => {
-    console.error("Unable to create the initial platform administrator; verify the migration and database configuration");
-    process.exitCode = 1;
-  })
+  .catch((error) => {
+  console.error("Super Admin creation failed:");
+  console.error(error.name);
+  console.error(error.message);
+  process.exitCode = 1;
+})
   .finally(async () => prisma.$disconnect());

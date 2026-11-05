@@ -14,6 +14,8 @@ const PERMISSIONS = Object.freeze({
     "users:update:any",
     "users:status:any",
     "users:deactivate:any",
+    "students:read:any",
+    "students:manage:any",
   ]),
   [ROLE.SCHOOL_ADMIN]: Object.freeze([
     "users:read:school",
@@ -21,6 +23,8 @@ const PERMISSIONS = Object.freeze({
     "users:update:school-members",
     "users:status:school-members",
     "users:deactivate:school-members",
+    "students:read:school",
+    "students:manage:school",
   ]),
   [ROLE.TEACHER]: Object.freeze([]),
   [ROLE.STUDENT]: Object.freeze([]),

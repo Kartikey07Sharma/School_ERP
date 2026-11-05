@@ -30,6 +30,13 @@ enum UserStatus {
   INACTIVE
 }
 
+enum StudentStatus {
+  ACTIVE
+  INACTIVE
+  GRADUATED
+  TRANSFERRED
+}
+
 model School {
   id              String          @id @default(uuid())
 
@@ -47,6 +54,7 @@ model School {
   status          SchoolStatus    @default(ACTIVE)
 
   users           User[]
+  students        Student[]
 
   createdAt       DateTime        @default(now())
   updatedAt       DateTime        @updatedAt
@@ -77,6 +85,7 @@ model User {
   schoolId    String?
 
   school      School?     @relation(fields: [schoolId], references: [id], onDelete: Restrict)
+  student     Student?
 
   authVersion Int         @default(0)
 
@@ -86,4 +95,38 @@ model User {
   @@index([schoolId])
 
   @@map("users")
+}
+
+model Student {
+  id                   String        @id @default(uuid())
+  admissionNumber      String
+  firstName            String
+  middleName           String?
+  lastName             String
+  dateOfBirth          DateTime      @db.Date
+  gender               String
+  admissionDate        DateTime      @db.Date
+  className            String
+  section              String
+  academicYear         String
+  email                String?
+  phone                String?
+  address              String
+  guardianName         String
+  guardianRelationship String
+  guardianPhone        String
+  guardianEmail        String?
+  status               StudentStatus @default(ACTIVE)
+  schoolId             String
+  portalUserId         String?       @unique
+  school               School        @relation(fields: [schoolId], references: [id], onDelete: Restrict)
+  portalUser           User?         @relation(fields: [portalUserId], references: [id], onDelete: SetNull)
+  createdAt            DateTime      @default(now())
+  updatedAt            DateTime      @updatedAt
+
+  @@unique([schoolId, admissionNumber])
+  @@index([schoolId, status])
+  @@index([schoolId, className, section, academicYear])
+  @@index([schoolId, lastName, firstName])
+  @@map("students")
 }
