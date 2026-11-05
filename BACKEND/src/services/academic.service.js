@@ -1,0 +1,91 @@
+const prisma = require("../repositories/academic.repository");
+const AppError = require("../utils/AppError");
+
+const gradeDefs = Array.from({ length: 12 }, (_, i) => ({ code: `CLASS_${i + 1}`, name: `Class ${i + 1}`, sequence: i + 1 }));
+const models = { years: "academicYear", periods: "academicPeriod", grades: "grade", sections: "section", subjects: "subject", enrollments: "studentAcademicEnrollment" };
+const ensureId = (id) => { if (typeof id !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id)) throw new AppError("Invalid record ID.", 400, "VALIDATION_ERROR"); };
+
+async function context(actor, requestedSchoolId, requiredType = "SCHOOL") {
+  if (!actor) throw new AppError("Authentication required", 401, "UNAUTHENTICATED");
+  if (!((actor.role === "SUPER_ADMIN") || actor.role === "SCHOOL_ADMIN")) throw new AppError("You do not have permission to manage academic records", 403, "FORBIDDEN");
+  const schoolId = actor.role === "SUPER_ADMIN" ? requestedSchoolId : actor.schoolId;
+  if (!schoolId) throw new AppError("schoolId is required for platform administrators", 400, "SCHOOL_REQUIRED");
+  if (actor.role !== "SUPER_ADMIN" && requestedSchoolId) throw new AppError("School administrators cannot supply schoolId", 400, "SCHOOL_ID_FORBIDDEN");
+  ensureId(schoolId);
+  const school = await prisma.school.findUnique({ where: { id: schoolId }, select: { id: true, institutionType: true, status: true } });
+  if (!school) throw new AppError("School not found", 404, "NOT_FOUND");
+  if (requiredType && school.institutionType !== requiredType) throw new AppError(requiredType === "SCHOOL" ? "This institution supports school academic structure only" : "This operation requires a college institution", 403, requiredType === "SCHOOL" ? "SCHOOL_ONLY" : "COLLEGE_ONLY");
+  return schoolId;
+}
+const owns = (model, id, schoolId) => { ensureId(id); return prisma[model].findFirst({ where: { id, schoolId } }); };
+
+async function initialize(actor, requestedSchoolId) {
+  const schoolId = await context(actor, requestedSchoolId);
+  await prisma.$transaction(gradeDefs.map((g) => prisma.grade.upsert({ where: { schoolId_code: { schoolId, code: g.code } }, create: { ...g, schoolId }, update: {} })));
+  return prisma.grade.findMany({ where: { schoolId }, orderBy: { sequence: "asc" } });
+}
+async function list(entity, actor, query = {}) {
+  const schoolId = await context(actor, query.schoolId, entity === "years" ? null : "SCHOOL");
+  for (const key of ["academicYearId", "gradeId", "sectionId", "studentId", "subjectId"]) if (query[key]) ensureId(query[key]);
+  if (entity === "periods") {
+    const year = await owns("academicYear", query.academicYearId, schoolId); if (!year) throw new AppError("Academic year not found", 404, "NOT_FOUND");
+    return prisma.academicPeriod.findMany({ where: { schoolId, academicYearId: year.id }, orderBy: { sequence: "asc" } });
+  }
+  if (entity === "classSubjects") {
+    const grade = await owns("grade", query.gradeId, schoolId); if (!grade) throw new AppError("Class not found", 404, "NOT_FOUND");
+    return prisma.classSubject.findMany({ where: { schoolId, gradeId: grade.id, status: "ACTIVE" }, include: { subject: true }, orderBy: { displayOrder: "asc" } });
+  }
+  if (entity === "subjectClasses") { const subject = await owns("subject", query.subjectId, schoolId); if (!subject) throw new AppError("Subject not found", 404, "NOT_FOUND"); return prisma.classSubject.findMany({ where: { schoolId, subjectId: subject.id }, include: { grade: true }, orderBy: { displayOrder: "asc" } }); }
+  if (entity === "enrollments") return prisma.studentAcademicEnrollment.findMany({ where: { schoolId, ...Object.fromEntries(["academicYearId", "gradeId", "sectionId", "studentId", "status"].filter((k) => query[k]).map((k) => [k, query[k]])) }, orderBy: [{ academicYear: { startDate: "desc" } }, { student: { lastName: "asc" } }] });
+  const model = prisma[models[entity]];
+  if (!model) throw new AppError("Academic resource not found", 404, "NOT_FOUND");
+  const where = { schoolId };
+  for (const key of ["status", "academicYearId", "gradeId", "subjectType"]) if (query[key]) where[key] = query[key];
+  if (query.search && entity === "subjects") where.OR = ["name", "code"].map((field) => ({ [field]: { contains: query.search, mode: "insensitive" } }));
+  const records = await model.findMany({ where, orderBy: entity === "grades" ? { sequence: "asc" } : { createdAt: "desc" }, ...(entity === "subjects" ? { skip: ((query.page || 1) - 1) * (query.limit || 20), take: query.limit || 20 } : {}) });
+  return entity === "subjects" ? { records, page: query.page || 1, pageSize: query.limit || 20 } : records;
+}
+async function create(entity, input, actor, requestedSchoolId) {
+  const schoolId = await context(actor, requestedSchoolId || input.schoolId, entity === "years" ? null : "SCHOOL");
+  const data = { ...input, schoolId }; delete data.schoolId;
+  if (entity === "years" && data.startDate >= data.endDate) throw new AppError("Academic year end date must be after start date.", 400, "VALIDATION_ERROR");
+  if (entity === "years" && data.isCurrent) return prisma.$transaction(async (tx) => { await tx.academicYear.updateMany({ where: { schoolId, isCurrent: true }, data: { isCurrent: false } }); return tx.academicYear.create({ data: { ...data, schoolId } }); });
+  if (entity === "periods") { const year = await owns("academicYear", data.academicYearId, schoolId); if (!year) throw new AppError("Academic year not found", 404, "NOT_FOUND"); if (data.startDate < year.startDate || data.endDate > year.endDate || data.startDate >= data.endDate) throw new AppError("Period dates must fall within the academic year.", 400, "VALIDATION_ERROR"); const overlap = await prisma.academicPeriod.findFirst({ where: { academicYearId: year.id, startDate: { lt: data.endDate }, endDate: { gt: data.startDate } } }); if (overlap) throw new AppError("Academic periods cannot overlap.", 409, "ACADEMIC_PERIOD_OVERLAP"); }
+  if (entity === "sections") { const [grade, year] = await Promise.all([owns("grade", data.gradeId, schoolId), owns("academicYear", data.academicYearId, schoolId)]); if (!grade) throw new AppError("Class must belong to the selected institution.", 400, "VALIDATION_ERROR"); if (!year) throw new AppError("Academic year not found", 404, "NOT_FOUND"); }
+  if (entity === "enrollments") { const [student, grade, year, section] = await Promise.all([prisma.student.findFirst({ where: { id: data.studentId, schoolId } }), owns("grade", data.gradeId, schoolId), owns("academicYear", data.academicYearId, schoolId), owns("section", data.sectionId, schoolId)]); if (!student || !grade || !year || !section || section.gradeId !== grade.id || section.academicYearId !== year.id) throw new AppError("Student, class, section and academic year must belong to this institution and match.", 400, "VALIDATION_ERROR"); }
+  if (entity === "classSubjects") { const [grade, subject] = await Promise.all([owns("grade", data.gradeId, schoolId), owns("subject", data.subjectId, schoolId)]); if (!grade || !subject) throw new AppError("Class and subject must belong to this institution.", 400, "VALIDATION_ERROR"); return prisma.classSubject.create({ data: { ...data, schoolId } }); }
+  const model = prisma[models[entity]]; if (!model) throw new AppError("Academic resource not found", 404, "NOT_FOUND");
+  return model.create({ data: { ...data, schoolId } });
+}
+async function get(entity, id, actor, requestedSchoolId) { const schoolId = await context(actor, requestedSchoolId, entity === "years" ? null : "SCHOOL"); if (entity === "classSubjects") { const row = await prisma.classSubject.findFirst({ where: { id, schoolId } }); if (!row) throw new AppError("Record not found", 404, "NOT_FOUND"); return row; } const row = await owns(models[entity], id, schoolId); if (!row) throw new AppError("Record not found", 404, "NOT_FOUND"); return row; }
+async function update(entity, id, input, actor, requestedSchoolId) { const schoolId = await context(actor, requestedSchoolId || input.schoolId, entity === "years" ? null : "SCHOOL"); delete input.schoolId; ensureId(id); const current = entity === "classSubjects" ? await prisma.classSubject.findFirst({ where: { id, schoolId } }) : await owns(models[entity], id, schoolId); if (!current) throw new AppError("Record not found", 404, "NOT_FOUND"); if (entity === "years") { const startDate = input.startDate || current.startDate, endDate = input.endDate || current.endDate; if (startDate >= endDate) throw new AppError("Academic year end date must be after start date.", 400, "VALIDATION_ERROR"); const [periods, enrollments] = await Promise.all([prisma.academicPeriod.count({ where: { academicYearId: id, OR: [{ startDate: { lt: startDate } }, { endDate: { gt: endDate } }] } }), prisma.studentAcademicEnrollment.count({ where: { academicYearId: id, OR: [{ enrollmentDate: { lt: startDate } }, { enrollmentDate: { gt: endDate } }] } })]); if (periods || enrollments) throw new AppError("Date changes would invalidate existing academic records.", 409, "ACADEMIC_RECORD_CONFLICT"); } if (entity === "periods") { const year = await owns("academicYear", input.academicYearId || current.academicYearId, schoolId); if (!year) throw new AppError("Academic year not found", 404, "NOT_FOUND"); const startDate = input.startDate || current.startDate, endDate = input.endDate || current.endDate; if (startDate >= endDate || startDate < year.startDate || endDate > year.endDate) throw new AppError("Period dates must fall within the academic year.", 400, "VALIDATION_ERROR"); const overlap = await prisma.academicPeriod.findFirst({ where: { academicYearId: year.id, id: { not: id }, startDate: { lt: endDate }, endDate: { gt: startDate } } }); if (overlap) throw new AppError("Academic periods cannot overlap.", 409, "ACADEMIC_PERIOD_OVERLAP"); input.academicYearId = year.id; } if (entity === "sections") { const grade = await owns("grade", input.gradeId || current.gradeId, schoolId), year = await owns("academicYear", input.academicYearId || current.academicYearId, schoolId); if (!grade || !year) throw new AppError("Class and academic year must belong to this institution.", 400, "VALIDATION_ERROR"); input.gradeId = grade.id; input.academicYearId = year.id; }
+  const editable = { years: ["name", "startDate", "endDate", "status"], periods: ["name", "code", "periodType", "sequence", "startDate", "endDate", "status", "academicYearId"], grades: ["description", "status"], sections: ["name", "code", "capacity", "roomNumber", "status", "gradeId", "academicYearId"], subjects: ["name", "code", "description", "subjectType", "status"], enrollments: ["rollNumber", "status", "leavingDate", "remarks"], classSubjects: ["subjectId", "isMandatory", "weeklyPeriods", "displayOrder", "status"] };
+  const unsupported = Object.keys(input).filter((key) => !editable[entity]?.includes(key));
+  if (unsupported.length) throw new AppError(`These fields cannot be changed through this endpoint: ${unsupported.join(", ")}`, 400, "VALIDATION_ERROR");
+  if (entity === "enrollments") { const data = Object.fromEntries(Object.entries(input).filter(([k]) => ["rollNumber", "status", "leavingDate", "remarks"].includes(k))); const result = await prisma.studentAcademicEnrollment.updateMany({ where: { id, schoolId }, data }); if (!result.count) throw new AppError("Record not found", 404, "NOT_FOUND"); return prisma.studentAcademicEnrollment.findFirst({ where: { id, schoolId } }); }
+  if (entity === "classSubjects") { const row = await prisma.classSubject.findFirst({ where: { id, schoolId } }); if (!row) throw new AppError("Record not found", 404, "NOT_FOUND"); if (input.subjectId && !await owns("subject", input.subjectId, schoolId)) throw new AppError("Subject must belong to this institution.", 400, "VALIDATION_ERROR"); const result = await prisma.classSubject.updateMany({ where: { id, schoolId }, data: input }); if (!result.count) throw new AppError("Record not found", 404, "NOT_FOUND"); return prisma.classSubject.findFirst({ where: { id, schoolId } }); }
+  if (entity === "years" && input.status === "INACTIVE" && current.isCurrent) return prisma.$transaction(async (tx) => { await tx.academicYear.updateMany({ where: { id, schoolId, isCurrent: true }, data: { isCurrent: false } }); await tx.academicYear.updateMany({ where: { id, schoolId }, data: input }); return tx.academicYear.findFirst({ where: { id, schoolId } }); });
+  const result = await prisma[models[entity]].updateMany({ where: { id, schoolId }, data: input }); if (!result.count) throw new AppError("Record not found", 404, "NOT_FOUND"); return prisma[models[entity]].findFirst({ where: { id, schoolId } }); }
+async function setCurrent(id, actor, requestedSchoolId) { ensureId(id); const schoolId = await context(actor, requestedSchoolId, null); await prisma.$transaction(async (tx) => { const year = await tx.academicYear.findFirst({ where: { id, schoolId } }); if (!year) throw new AppError("Academic year not found", 404, "NOT_FOUND"); if (year.status !== "ACTIVE") throw new AppError("Inactive academic year cannot be current", 409, "INVALID_STATE"); await tx.academicYear.updateMany({ where: { schoolId, isCurrent: true }, data: { isCurrent: false } }); await tx.academicYear.updateMany({ where: { id, schoolId }, data: { isCurrent: true } }); }); return owns("academicYear", id, schoolId); }
+async function deactivateClassSubject(mappingId, gradeId, actor, requestedSchoolId) { ensureId(mappingId); ensureId(gradeId); const schoolId = await context(actor, requestedSchoolId); const [mapping, grade] = await Promise.all([prisma.classSubject.findFirst({ where: { id: mappingId, schoolId } }), owns("grade", gradeId, schoolId)]); if (!mapping || !grade || mapping.gradeId !== grade.id) throw new AppError("Class-subject mapping not found", 404, "NOT_FOUND"); await prisma.classSubject.updateMany({ where: { id: mappingId, schoolId, gradeId }, data: { status: "INACTIVE" } }); return prisma.classSubject.findFirst({ where: { id: mappingId, schoolId, gradeId } }); }
+async function updateClassSubject(gradeId, subjectId, input, actor, requestedSchoolId) { ensureId(gradeId); ensureId(subjectId); const schoolId = await context(actor, requestedSchoolId || input.schoolId); delete input.schoolId; const [grade, subject, mapping] = await Promise.all([owns("grade", gradeId, schoolId), owns("subject", subjectId, schoolId), prisma.classSubject.findFirst({ where: { schoolId, gradeId, subjectId } })]); if (!grade || !subject || !mapping) throw new AppError("Class-subject mapping not found", 404, "NOT_FOUND"); const allowed = ["isMandatory", "weeklyPeriods", "displayOrder", "status"]; const unsupported = Object.keys(input).filter((key) => !allowed.includes(key)); if (unsupported.length) throw new AppError(`These fields cannot be changed through this endpoint: ${unsupported.join(", ")}`, 400, "VALIDATION_ERROR"); const result = await prisma.classSubject.updateMany({ where: { id: mapping.id, schoolId, gradeId, subjectId }, data: input }); if (!result.count) throw new AppError("Class-subject mapping not found", 404, "NOT_FOUND"); return prisma.classSubject.findFirst({ where: { id: mapping.id, schoolId, gradeId, subjectId } }); }
+async function transferEnrollment(id, input, actor, requestedSchoolId) {
+  ensureId(id);
+  const schoolId = await context(actor, requestedSchoolId || input.schoolId, "SCHOOL");
+  const previous = await prisma.studentAcademicEnrollment.findFirst({ where: { id, schoolId } });
+  if (!previous) throw new AppError("Academic enrolment not found", 404, "NOT_FOUND");
+  if (previous.status !== "ACTIVE") throw new AppError("Only an active enrolment can be transferred.", 409, "INVALID_STATE");
+  const [grade, section, year] = await Promise.all([owns("grade", input.gradeId, schoolId), owns("section", input.sectionId, schoolId), owns("academicYear", previous.academicYearId, schoolId)]);
+  if (!grade || !section || !year || section.gradeId !== grade.id || section.academicYearId !== year.id || previous.academicYearId !== year.id) throw new AppError("Target class and section must belong to the same school and academic year.", 400, "VALIDATION_ERROR");
+  if (section.id === previous.sectionId && grade.id === previous.gradeId) throw new AppError("Target placement is unchanged.", 400, "VALIDATION_ERROR");
+  if (input.transferDate < previous.enrollmentDate || input.transferDate > year.endDate) throw new AppError("Transfer date must fall between the existing enrolment date and academic year end.", 400, "VALIDATION_ERROR");
+  if (section.capacity != null) { const occupied = await prisma.studentAcademicEnrollment.count({ where: { schoolId, sectionId: section.id, status: "ACTIVE" } }); if (occupied >= section.capacity) throw new AppError("Target section capacity has been reached.", 409, "CAPACITY_REACHED"); }
+  return prisma.$transaction(async (tx) => {
+    const changed = await tx.studentAcademicEnrollment.updateMany({ where: { id, schoolId, status: "ACTIVE" }, data: { status: "WITHDRAWN", leavingDate: input.transferDate } });
+    if (!changed.count) throw new AppError("Academic enrolment is no longer active.", 409, "INVALID_STATE");
+    const current = await tx.studentAcademicEnrollment.create({ data: { schoolId, studentId: previous.studentId, academicYearId: previous.academicYearId, gradeId: grade.id, sectionId: section.id, rollNumber: input.rollNumber ?? null, status: "ACTIVE", enrollmentDate: input.transferDate, remarks: input.remarks } });
+    return { previous: await tx.studentAcademicEnrollment.findFirst({ where: { id, schoolId } }), current };
+  });
+}
+async function history(studentId, actor, requestedSchoolId) { ensureId(studentId); const schoolId = await context(actor, requestedSchoolId); if (!await prisma.student.findFirst({ where: { id: studentId, schoolId }, select: { id: true } })) throw new AppError("Student not found", 404, "NOT_FOUND"); return prisma.studentAcademicEnrollment.findMany({ where: { studentId, schoolId }, include: { academicYear: true, grade: true, section: true }, orderBy: [{ academicYear: { startDate: "asc" } }, { enrollmentDate: "asc" }, { createdAt: "asc" }] }); }
+module.exports = { initialize, list, create, get, update, setCurrent, deactivateClassSubject, updateClassSubject, transferEnrollment, history };

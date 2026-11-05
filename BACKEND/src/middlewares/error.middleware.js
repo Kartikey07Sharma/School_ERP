@@ -4,6 +4,8 @@ const errorMiddleware = (err, req, res, next) => {
   let safeError = err;
   if (err?.code === "P2002" || err?.code === "23505") {
     safeError = new AppError("A record with those details already exists", 409, "CONFLICT");
+  } else if (err?.code === "P2034") {
+    safeError = new AppError("A concurrent update conflicted with this operation. Please retry.", 409, "CONCURRENT_WRITE");
   } else if (err?.code === "P2025") {
     safeError = new AppError("Record not found", 404, "NOT_FOUND");
   } else if (err?.code === "P2003") {

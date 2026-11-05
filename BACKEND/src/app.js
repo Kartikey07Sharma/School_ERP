@@ -6,6 +6,8 @@ const schoolRoutes = require("./routes/school.routes");
 const userRoutes = require("./routes/user.routes");
 const authRoutes = require("./routes/auth.routes");
 const studentRoutes = require("./routes/student.routes");
+const academicRoutes = require("./routes/academic.routes");
+const collegeRoutes = require("./routes/college.routes");
 
 const errorMiddleware = require(
   "./middlewares/error.middleware"
@@ -73,6 +75,9 @@ app.use(
   "/api/v1/students",
   studentRoutes
 );
+
+app.use("/api/v1", academicRoutes);
+app.use("/api/v1", collegeRoutes);
 
 /**
  * Global Error Handler

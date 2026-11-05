@@ -18,8 +18,12 @@ const getSchoolByCode = async (code) => {
 const getAllSchools = () => schoolRepository().findAllSchools();
 
 const updateSchool = async (id, data) => {
-  await getSchoolById(id);
-  return schoolRepository().updateSchool(id, data);
+  const existing = await getSchoolById(id);
+  if (data.institutionType && data.institutionType !== existing.institutionType) {
+    throw new AppError("Institution type cannot be changed through the school profile API", 409, "INSTITUTION_TYPE_CHANGE_REQUIRES_MIGRATION");
+  }
+  const { institutionType, ...safeData } = data;
+  return schoolRepository().updateSchool(id, safeData);
 };
 
 const changeSchoolStatus = async (id, status) => {

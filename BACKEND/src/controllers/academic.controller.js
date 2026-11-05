@@ -1,0 +1,13 @@
+const service = require("../services/academic.service");
+const run = (fn, status = 200) => async (req, res, next) => { try { const data = await fn(req); res.status(status).json({ success: true, data }); } catch (e) { next(e); } };
+exports.initialize = run((r) => service.initialize(r.user, r.validatedQuery.schoolId));
+exports.list = (entity) => run((r) => service.list(entity, r.user, r.validatedQuery));
+exports.create = (entity) => run((r) => service.create(entity, r.body, r.user, r.validatedQuery.schoolId), 201);
+exports.get = (entity) => run((r) => service.get(entity, r.params.id, r.user, r.validatedQuery.schoolId));
+exports.update = (entity) => run((r) => service.update(entity, r.params.id, r.body, r.user, r.validatedQuery.schoolId));
+exports.deactivateMapping = run((r) => service.deactivateClassSubject(r.params.mappingId, r.params.gradeId, r.user, r.validatedQuery.schoolId));
+exports.updateMapping = run((r) => service.updateClassSubject(r.params.gradeId, r.params.subjectId, r.body, r.user, r.validatedQuery.schoolId));
+exports.transferEnrollment = run((r) => service.transferEnrollment(r.params.id, r.body, r.user, r.validatedQuery.schoolId), 201);
+exports.setCurrent = run((r) => service.setCurrent(r.params.id, r.user, r.validatedQuery.schoolId));
+exports.history = run((r) => service.history(r.params.studentId, r.user, r.validatedQuery.schoolId));
+exports.current = run(async (r) => { const rows = await service.list("years", r.user, r.validatedQuery); return rows.find((x) => x.isCurrent) || null; });
