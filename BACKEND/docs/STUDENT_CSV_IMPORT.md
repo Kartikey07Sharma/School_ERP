@@ -6,11 +6,13 @@ Student CSV Import admits many students in one request while reusing the Part 1 
 
 Required columns:
 
-`admissionNumber,firstName,lastName,dateOfBirth,gender,admissionDate,className,section,academicYear,address,guardianName,guardianRelationship,guardianPhone`
+`admissionNumber,firstName,lastName,dateOfBirth,gender,admissionDate,address,guardianName,guardianRelationship,guardianPhone`
 
 Optional columns:
 
-`middleName,email,phone,guardianEmail`
+`middleName,className,section,academicYear,email,phone,guardianEmail,guardianAddress,city,state,postalCode,bloodGroup`
+
+`className`, `section`, and `academicYear` are accepted as optional legacy snapshots. Phase 4 enrollment records remain authoritative for current placement.
 
 Columns may be in any order. Optional columns may be omitted. Header comparison ignores capitalization and whitespace, so `First Name` matches `firstName`. Unrecognized names, duplicate normalized names, missing required columns, and empty headers reject the entire file. Internal fields such as `schoolId`, `id`, `portalUserId`, and `status` are not permitted.
 

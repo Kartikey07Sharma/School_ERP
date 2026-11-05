@@ -4,6 +4,11 @@ const {
   createStudentSchema,
   updateStudentSchema,
   studentQuerySchema,
+  createPortalAccountSchema,
+  linkPortalAccountSchema,
+  portalAccountStatusSchema,
+  changeStudentStatusSchema,
+  updateMyStudentProfileSchema,
 } = require("../src/validations/student.validation");
 
 const validStudent = () => ({
@@ -74,4 +79,47 @@ test("student list query validates bounded pagination and filters", () => {
   assert.equal(result.data.page, 2);
   assert.equal(result.data.limit, 10);
   assert.equal(studentQuerySchema.safeParse({ limit: "101" }).success, false);
+});
+
+test("Phase 4 placement snapshots are optional and profile contact fields validate", () => {
+  const input = validStudent();
+  delete input.className;
+  delete input.section;
+  delete input.academicYear;
+  input.guardianAddress = "Separate guardian address";
+  input.city = "Pune";
+  input.state = "Maharashtra";
+  input.postalCode = "411001";
+  input.bloodGroup = "O+";
+  const parsed = createStudentSchema.safeParse(input);
+  assert.equal(parsed.success, true);
+  assert.equal(parsed.data.guardianAddress, "Separate guardian address");
+  assert.equal(createStudentSchema.safeParse({ ...validStudent(), guardianPhone: "call me" }).success, false);
+  assert.equal(createStudentSchema.safeParse({ ...validStudent(), bloodGroup: "X+" }).success, false);
+});
+
+test("shared portal account schemas reject roles, school IDs and weak credentials", () => {
+  assert.equal(createPortalAccountSchema.safeParse({ email: " FAMILY@example.com ", password: "this-is-a-long-password", phone: "+919876543210" }).success, true);
+  assert.equal(createPortalAccountSchema.safeParse({ email: "family@example.com", password: "short" }).success, false);
+  assert.equal(createPortalAccountSchema.safeParse({ email: "family@example.com", password: "this-is-a-long-password", role: "PARENT" }).success, false);
+  assert.equal(linkPortalAccountSchema.safeParse({ userId: "not-a-uuid" }).success, false);
+  assert.equal(portalAccountStatusSchema.safeParse({ status: "SUSPENDED" }).success, false);
+  assert.equal(changeStudentStatusSchema.safeParse({ status: "WITHDRAWN" }).success, true);
+});
+
+test("portal self-profile accepts contact and guardian fields but rejects identity and academic fields", () => {
+  assert.equal(updateMyStudentProfileSchema.safeParse({ phone: "+919876543210", guardianEmail: "guardian@example.test", guardianAddress: "Home" }).success, true);
+  assert.equal(updateMyStudentProfileSchema.safeParse({ email: "not-an-email" }).success, false);
+  assert.equal(updateMyStudentProfileSchema.safeParse({ phone: "bad phone" }).success, false);
+  assert.equal(updateMyStudentProfileSchema.safeParse({}).success, false);
+  for (const field of ["id", "schoolId", "admissionNumber", "portalUserId", "status", "gradeId", "sectionId", "programmeId", "academicYearId", "role"]) {
+    assert.equal(updateMyStudentProfileSchema.safeParse({ [field]: "unexpected" }).success, false, field);
+  }
+});
+
+test("portal academic history query is bounded and paginated", () => {
+  const { portalAcademicQuerySchema } = require("../src/validations/student.validation");
+  assert.deepEqual(portalAcademicQuerySchema.parse({ page: "2", limit: "25" }), { page: 2, limit: 25 });
+  assert.equal(portalAcademicQuerySchema.safeParse({ page: "0" }).success, false);
+  assert.equal(portalAcademicQuerySchema.safeParse({ limit: "101" }).success, false);
 });

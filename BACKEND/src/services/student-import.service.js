@@ -6,10 +6,9 @@ const { parseCsvBuffer } = require("../utils/csv-parser");
 
 const REQUIRED_HEADERS = [
   "admissionNumber", "firstName", "lastName", "dateOfBirth", "gender", "admissionDate",
-  "className", "section", "academicYear", "address", "guardianName",
-  "guardianRelationship", "guardianPhone",
+  "address", "guardianName", "guardianRelationship", "guardianPhone",
 ];
-const OPTIONAL_HEADERS = ["middleName", "email", "phone", "guardianEmail"];
+const OPTIONAL_HEADERS = ["middleName", "className", "section", "academicYear", "email", "phone", "guardianEmail", "guardianAddress", "city", "state", "postalCode", "bloodGroup"];
 const ALL_HEADERS = [...REQUIRED_HEADERS, ...OPTIONAL_HEADERS];
 const DB_LOOKUP_BATCH_SIZE = 500;
 const INSERT_BATCH_SIZE = 250;

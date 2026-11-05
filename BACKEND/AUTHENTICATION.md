@@ -8,7 +8,7 @@
 - `POST /api/v1/auth/refresh` rotates the cookie token atomically and returns the next access token and CSRF token. Send the current `csrfToken` as `X-CSRF-Token`; the HTTP client must retain the cookie jar. Reuse of an old refresh token revokes that session and requires another login.
 - `POST /api/v1/auth/logout` requires a Bearer access token and, while the refresh cookie is present, the matching `X-CSRF-Token`. It revokes that session and clears the cookie.
 - `GET /api/v1/auth/me` returns the current active account without password/auth-version fields.
-- `PATCH /api/v1/auth/change-password` accepts `{ "currentPassword", "newPassword" }`; new passwords require 12–72 UTF-8 bytes. A successful change increments the database auth version and revokes the user's sessions.
+- `PATCH /api/v1/auth/change-password` accepts `{ "currentPassword", "newPassword" }`; new passwords require 12–72 UTF-8 bytes and must differ from the current password. A successful change bcrypt-hashes the new password, increments the database auth version, revokes the user's sessions, and invalidates the access token used for the request. The shared student-parent identity has one password.
 
 Redis-backed login/refresh throttling and all session validation fail closed with `503` when Redis is unavailable. Existing non-auth health liveness is still separate. Authenticated requests check current user status, role, tenant, and auth version in PostgreSQL, so database unavailability also prevents access. Passwords are bcrypt-hashed with cost 12. Login failures use a generic message to avoid account enumeration.
 
@@ -16,13 +16,15 @@ Redis-backed login/refresh throttling and all session validation fail closed wit
 
 | Role | School management | User access | User creation | User status/deactivation |
 |---|---|---|---|---|
-| `SUPER_ADMIN` | Create, list, read, update, and change status for schools | Any school | `SCHOOL_ADMIN`, `TEACHER`, `STUDENT`, `PARENT` for a selected school | Any account except self |
-| `SCHOOL_ADMIN` | None | Own school only | `TEACHER`, `STUDENT`, `PARENT`; school is derived from the authenticated account | Own school members only; cannot manage another school admin or self |
+| `SUPER_ADMIN` | Create, list, read, update, and change status for schools | Any school | `SCHOOL_ADMIN`, `TEACHER`; shared `STUDENT` accounts only through the Student portal-account API | Any account except self |
+| `SCHOOL_ADMIN` | None | Own school only | `TEACHER`; shared `STUDENT` accounts only through the Student portal-account API | Own school members only; cannot manage another school admin or self |
 | `TEACHER` | None | `/auth/me` only | None | None |
 | `STUDENT` | None | `/auth/me` only | None | None |
 | `PARENT` | None | `/auth/me` only | None | None |
 
 No HTTP endpoint can assign `SUPER_ADMIN`. Initial platform administration is bootstrapped with the one-time CLI command below. User `DELETE` is a soft deactivation (`INACTIVE`) and increments `authVersion`; it does not erase school records. Changing a school's status increments `authVersion` for its users in the same database transaction, so suspension followed by reactivation cannot revive old credentials. School administrators' user queries always derive tenant scope from their verified account. A client-supplied school ID is only honored for a super-admin; for a school administrator a mismatch is forbidden.
+
+The `PARENT` and `STUDENT` enum values remain for backward compatibility and existing accounts continue to authenticate. Generic `POST /users` cannot create either role. One shared student-parent identity is created or explicitly linked through the Student management API and uses the `STUDENT` role; the authentication system does not distinguish which family member is using those credentials.
 
 ## Database migration and first administrator
 
@@ -85,7 +87,7 @@ Positive scenarios:
 1. Log in as an active account; expect `200`, a bearer token and CSRF token in JSON, a `Set-Cookie` refresh token with `HttpOnly`, and no `password` property.
 2. Call `/api/v1/auth/me`; expect the active account and role without password/hash/authVersion.
 3. Refresh with the cookie jar and current CSRF header; expect a new access token and a rotated cookie. The previous cookie value must not work again.
-4. Change password with the current password and a strong new password; expect `200`; the old access token/session then fails and login with the new password succeeds.
+4. Change password with the current password and a strong, different new password; expect `200`; the old access token and refresh session then fail and login with the new password succeeds. A wrong current password or reusing the current password is rejected.
 5. Log out; expect `200`, a cleared cookie, and rejection of the revoked access token.
 6. As `SCHOOL_ADMIN`, list/create/read only users in the attached school. As `SUPER_ADMIN`, school-management routes and cross-school administration are allowed.
 
@@ -99,7 +101,7 @@ Negative scenarios:
 6. A school admin requests another school's user, supplies a different `schoolId`, tries to assign `SUPER_ADMIN`, or manages another admin: expect `403` (a target outside their school may return scoped `404`).
 7. A teacher/student/parent calls a user or school administration endpoint: expect `403`.
 8. Change or status-deactivate an account with active tokens, then call `/me`: expect `401` because the database status/auth version is checked each time.
-9. Submit invalid email, missing login password, weak change password, or a user-create `SUPER_ADMIN` role: expect `400` validation error.
+9. Submit invalid email, missing login password, weak change password, or a user-create `SUPER_ADMIN`, `STUDENT`, or `PARENT` role: expect `400` validation error. Shared student accounts are created through the Student API.
 
 ## Safe HTTP errors
 

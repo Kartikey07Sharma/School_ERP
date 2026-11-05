@@ -124,7 +124,7 @@ function testAuthService({ user = baseUser(), ready = true } = {}) {
     db,
     redis,
     settings,
-    bcryptLib: { compare: async () => true, hash: async () => "new-hash" },
+    bcryptLib: { compare: async (candidate) => candidate !== "a-new-long-password", hash: async () => "new-hash" },
     jwtLib: { sign: (claims) => `signed:${claims.sub}:${claims.sid}:${claims.ver}` },
   });
   return { service, redis, user };
@@ -197,6 +197,12 @@ test("change-password increments auth version and clears every user's session", 
   assert.equal(redis.client.sets.has(`auth:user-sessions:${user.id}`), false);
 });
 
+test("change-password rejects reuse of the current password", async () => {
+  const { service, user } = testAuthService();
+  await assert.rejects(service.changePassword(user.id, "current", "current"), { code: "PASSWORD_UNCHANGED", statusCode: 400 });
+  assert.equal(user.authVersion, 0);
+});
+
 test("authentication middleware rejects deactivated and cross-version tokens", async () => {
   const redis = fakeRedis();
   redis.client.hashes.set("auth:session:sid-12345678901234567890", { userId: "user-1", csrfToken: "csrf" });
@@ -256,6 +262,9 @@ test("school administrators cannot create accounts in another tenant or assign p
   const input = { firstName: "A User", email: "a@example.test", password: "long-enough-password", role: "TEACHER", schoolId: "school-b" };
   await assert.rejects(service.createUser(input, actor), { code: "TENANT_FORBIDDEN", statusCode: 403 });
   await assert.rejects(service.createUser({ ...input, role: "SUPER_ADMIN", schoolId: "school-a" }, actor), { code: "ROLE_ASSIGNMENT_FORBIDDEN" });
+  for (const role of ["STUDENT", "PARENT"]) {
+    await assert.rejects(service.createUser({ ...input, role, schoolId: "school-a" }, actor), { code: "ROLE_ASSIGNMENT_FORBIDDEN" });
+  }
   assert.equal(calls.length, 0);
 });
 
@@ -322,6 +331,9 @@ test("authentication schemas reject malformed login and weak or overlong passwor
   assert.equal(createUserSchema.safeParse({
     firstName: "Alex", email: "alex@example.test", password: "a-long-enough-password", role: "SUPER_ADMIN", schoolId: "a",
   }).success, false);
+  for (const role of ["STUDENT", "PARENT"]) {
+    assert.equal(createUserSchema.safeParse({ firstName: "Alex", email: "alex@example.test", password: "a-long-enough-password", role }).success, false);
+  }
 });
 
 test("rate limit middleware fails closed when Redis is unavailable", async () => {

@@ -168,3 +168,119 @@ test("service deletion is a soft deactivation", async () => {
   assert.equal(byId.get(student.id).status, "INACTIVE");
   assert.equal(byId.has(student.id), true);
 });
+
+test("shared portal account creation hashes the password and returns only safe user fields", async () => {
+  const studentId = "11111111-1111-4111-8111-111111111111";
+  let captured;
+  const scoped = createStudentService({
+    students: { createPortalAccountAndLink: async (id, schoolId, data) => { captured = { id, schoolId, data }; return { state: "LINKED", user: { id: "user-1", role: "STUDENT", schoolId, email: data.email, status: "ACTIVE" } }; } },
+    schools: { findSchoolById: async (id) => ({ id, status: "ACTIVE" }) },
+    bcryptLib: { hash: async (password, rounds) => { assert.equal(rounds, 12); return `bcrypt:${password}`; } },
+  });
+  const account = await scoped.createPortalAccount(studentId, { email: " FAMILY@example.test ", password: "a-very-long-password" }, undefined, admin);
+  assert.equal(captured.id, studentId);
+  assert.equal(captured.schoolId, schoolA);
+  assert.equal(captured.data.email, "family@example.test");
+  assert.equal(captured.data.password, "bcrypt:a-very-long-password");
+  assert.equal(account.role, "STUDENT");
+  assert.equal(Object.hasOwn(account, "password"), false);
+});
+
+test("portal account linking rejects cross-tenant, non-student and already-linked user outcomes", async () => {
+  const studentId = "22222222-2222-4222-8222-222222222222";
+  const userId = "33333333-3333-4333-8333-333333333333";
+  let state = "USER_NOT_FOUND";
+  const service = createStudentService({
+    students: { linkPortalUser: async (id, schoolId, requestedUserId) => { assert.equal(id, studentId); assert.equal(schoolId, schoolA); assert.equal(requestedUserId, userId); return { state }; } },
+    schools: { findSchoolById: async (id) => ({ id, status: "ACTIVE" }) },
+  });
+  await assert.rejects(service.linkPortalAccount(studentId, userId, undefined, admin), { code: "NOT_FOUND" });
+  state = "USER_INELIGIBLE";
+  await assert.rejects(service.linkPortalAccount(studentId, userId, undefined, admin), { code: "USER_INELIGIBLE" });
+  state = "USER_ALREADY_LINKED";
+  await assert.rejects(service.linkPortalAccount(studentId, userId, undefined, admin), { code: "USER_ALREADY_LINKED" });
+});
+
+test("portal account status changes remain scoped to the authenticated institution", async () => {
+  const studentId = "44444444-4444-4444-8444-444444444444";
+  const calls = [];
+  const service = createStudentService({
+    students: { updatePortalAccountStatus: async (...args) => { calls.push(args); return { state: "UPDATED", user: { id: "user-1", role: "STUDENT", status: args[2], schoolId: args[1] } }; } },
+    schools: { findSchoolById: async (id) => ({ id, status: "ACTIVE" }) },
+  });
+  assert.equal((await service.changePortalAccountStatus(studentId, "INACTIVE", undefined, admin)).status, "INACTIVE");
+  assert.equal((await service.changePortalAccountStatus(studentId, "ACTIVE", undefined, admin)).status, "ACTIVE");
+  assert.deepEqual(calls.map((call) => call.slice(0, 3)), [[studentId, schoolA, "INACTIVE"], [studentId, schoolA, "ACTIVE"]]);
+  await assert.rejects(service.changePortalAccountStatus(studentId, "INACTIVE", undefined, { role: "TEACHER", schoolId: schoolA }), { code: "FORBIDDEN" });
+});
+
+const portalActor = { id: "portal-user", role: "STUDENT", schoolId: schoolA };
+const portalProfile = (institutionType = "SCHOOL") => ({
+  id: "student-owned", schoolId: schoolA, portalUserId: portalActor.id, firstName: "Rahul", middleName: null, lastName: "Sharma",
+  admissionNumber: "A001", status: "ACTIVE", guardianName: "Amit", guardianRelationship: "Father", guardianPhone: "9876543210", guardianEmail: "guardian@example.test",
+  school: { id: schoolA, name: "A Institution", institutionType },
+});
+
+test("portal dashboard resolves the Student from the authenticated user and returns scoped profile data", async () => {
+  const { service } = setup({ studentOverrides: {
+    findPortalProfile: async (userId, tenantId) => userId === portalActor.id && tenantId === schoolA ? portalProfile() : null,
+    findSchoolAcademicData: async () => ({ current: null, records: [], total: 0, page: 1, pageSize: 10, totalPages: 0 }),
+  } });
+  const dashboard = await service.getMyStudentDashboard(portalActor);
+  assert.equal(dashboard.student.id, "student-owned");
+  assert.equal(dashboard.student.fullName, "Rahul Sharma");
+  assert.equal(dashboard.institution.institutionType, "SCHOOL");
+  assert.equal(dashboard.guardian.name, "Amit");
+  assert.equal(dashboard.academicSummary.current, null);
+  await assert.rejects(service.getMyStudentDashboard({ ...portalActor, role: "PARENT" }), { code: "FORBIDDEN" });
+});
+
+test("school portal academics prefer authoritative enrolment data over profile snapshots", async () => {
+  const placement = {
+    id: "enrollment-1", status: "ACTIVE", rollNumber: "05", enrollmentDate: new Date("2026-04-01"), leavingDate: null,
+    academicYear: { id: "year-1", name: "2026–27", isCurrent: true },
+    grade: { id: "grade-5", name: "Class 5", code: "CLASS_5", sequence: 5, subjectMappings: [{ isMandatory: true, subject: { id: "subject-1", name: "Math", code: "MATH" } }] },
+    section: { id: "section-a", name: "A", code: "A", status: "ACTIVE" },
+  };
+  const { service } = setup({ studentOverrides: {
+    findPortalProfile: async () => ({ ...portalProfile(), className: "Legacy Class 9", section: "Z", academicYear: "Legacy", school: { ...portalProfile().school, institutionType: "SCHOOL" } }),
+    findSchoolAcademicData: async (_studentId, _schoolId, page, limit) => ({ current: placement, records: [placement], total: 1, page, pageSize: limit, totalPages: 1 }),
+  } });
+  const result = await service.getMyStudentAcademicInformation(portalActor, { page: 1, limit: 10 });
+  assert.equal(result.current.grade.name, "Class 5");
+  assert.equal(result.current.academicYear.name, "2026–27");
+  assert.equal(result.current.subjects[0].name, "Math");
+});
+
+test("college portal academics expose configured programme, current term and registered courses", async () => {
+  const current = {
+    id: "programme-enrollment", status: "ACTIVE", registrationNumber: "REG-1", admissionDate: new Date("2026-06-01"),
+    programme: { id: "programme-1", name: "Bachelor of Arts", durationYears: 3, totalSemesters: 6, termMode: "SEMESTER", department: { id: "dept-1", name: "Arts" } },
+    curriculumVersion: { id: "curriculum-1", versionCode: "2026", termMode: "SEMESTER" },
+    batch: { id: "batch-1", admissionYear: 2026 },
+    semesterEnrollments: [{ id: "semester-1", status: "ACTIVE", academicYear: { name: "2026–27", isCurrent: true }, programmeTerm: { name: "Term 1", sequence: 1, semesterNumber: 1 } }],
+  };
+  const { service } = setup({ studentOverrides: {
+    findPortalProfile: async () => ({ ...portalProfile("COLLEGE"), school: { ...portalProfile("COLLEGE").school, institutionType: "COLLEGE" } }),
+    findCollegeAcademicData: async (_studentId, _schoolId, page, limit) => ({ current, records: [current], total: 1, page, pageSize: limit, totalPages: 1 }),
+    findCollegeCourseRegistrations: async () => ({ records: [{ course: { name: "History", credits: 3 } }], total: 1, page: 1, pageSize: 10, totalPages: 1 }),
+  } });
+  const result = await service.getMyStudentAcademicInformation(portalActor, { page: 1, limit: 10 });
+  assert.equal(result.current.programme.name, "Bachelor of Arts");
+  assert.equal(result.current.currentSemesterEnrollment.programmeTerm.semesterNumber, 1);
+  assert.equal(result.courseRegistrations.records[0].course.name, "History");
+  assert.equal(result.current.programme.totalSemesters, 6);
+});
+
+test("portal profile updates use only the linked Student and leave account identity management separate", async () => {
+  let call;
+  const { service } = setup({ studentOverrides: {
+    findPortalProfile: async (userId, tenantId) => userId === portalActor.id && tenantId === schoolA ? portalProfile() : null,
+    updatePortalProfile: async (...args) => { call = args; return { ...portalProfile(), guardianEmail: args[2].guardianEmail }; },
+  } });
+  const updated = await service.updateMyStudentProfile({ guardianEmail: "new-guardian@example.test" }, portalActor);
+  assert.equal(call[0], portalActor.id);
+  assert.equal(call[1], schoolA);
+  assert.deepEqual(call[2], { guardianEmail: "new-guardian@example.test" });
+  assert.equal(updated.guardianEmail, "new-guardian@example.test");
+});

@@ -244,6 +244,9 @@ function createAuthService({ db, redis, bcryptLib = bcrypt, jwtLib = jwt, settin
     if (!user || user.status !== "ACTIVE" || !(await bcryptLib.compare(currentPassword, user.password))) {
       throw new AppError("Current password is incorrect", 400, "INVALID_CURRENT_PASSWORD");
     }
+    if (await bcryptLib.compare(newPassword, user.password)) {
+      throw new AppError("New password must be different from the current password", 400, "PASSWORD_UNCHANGED");
+    }
 
     const hashedPassword = await bcryptLib.hash(newPassword, 12);
     try {

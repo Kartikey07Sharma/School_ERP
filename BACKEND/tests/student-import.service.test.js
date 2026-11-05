@@ -6,7 +6,7 @@ const schoolA = "school-a";
 const schoolB = "school-b";
 const admin = { id: "admin-a", role: "SCHOOL_ADMIN", schoolId: schoolA };
 const superAdmin = { id: "root", role: "SUPER_ADMIN", schoolId: null };
-const headers = [...REQUIRED_HEADERS.slice(0, 5), "middleName", ...REQUIRED_HEADERS.slice(5, 9), "email", "phone", ...REQUIRED_HEADERS.slice(9), "guardianEmail"];
+const headers = ["admissionNumber", "firstName", "middleName", "lastName", "dateOfBirth", "gender", "admissionDate", "className", "section", "academicYear", "email", "phone", "address", "guardianName", "guardianRelationship", "guardianPhone", "guardianEmail"];
 const validRow = (admissionNumber = "0001", extra = {}) => ({
   admissionNumber,
   firstName: "Asha",
@@ -68,6 +68,18 @@ test("preview validates headers case-insensitively and tolerates surrounding/int
   const result = await service.preview(bufferFor([validRow()], spacedHeaders), admin);
   assert.equal(result.summary.validRows, 1);
   assert.equal(result.rows[0].status, "VALID");
+});
+
+test("CSV admission no longer requires legacy class, section or year snapshots", async () => {
+  const { service } = setup();
+  const row = validRow("00991");
+  delete row.className;
+  delete row.section;
+  delete row.academicYear;
+  const result = await service.preview(bufferFor([row]), admin);
+  assert.equal(result.summary.validRows, 1);
+  const imported = await service.importStudents(bufferFor([row]), admin);
+  assert.equal(imported.summary.importedRows, 1);
 });
 
 test("preview rejects missing, duplicate, empty, unexpected and internal headers", async () => {

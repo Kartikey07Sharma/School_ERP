@@ -6,8 +6,6 @@ const { z } = require("zod");
 const ManagedUserRoleEnum = z.enum([
   "SCHOOL_ADMIN",
   "TEACHER",
-  "STUDENT",
-  "PARENT",
 ]);
 
 /**

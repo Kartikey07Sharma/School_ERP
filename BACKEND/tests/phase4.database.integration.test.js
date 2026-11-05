@@ -100,8 +100,6 @@ test("Phase 4 school/college workflows, tenant security, auth and real PostgreSQ
     const collegeAdminA = await createUser(root, collegeA, "SCHOOL_ADMIN", "college-admin-a");
     const collegeAdminB = await createUser(root, collegeB, "SCHOOL_ADMIN", "college-admin-b");
     const teacherA = await createUser(root, collegeA, "TEACHER", "teacher-a");
-    const studentUser = await createUser(root, collegeA, "STUDENT", "student-user");
-    const parentUser = await createUser(root, collegeA, "PARENT", "parent-user");
 
     // School workflow: shared year, current-year lifecycle, terms, fixed grades, sections, subjects and placement.
     const yearA = await request("POST", "/academic-years", schoolAdminA, { name: `${tag}-2026-27`, startDate: "2026-04-01", endDate: "2027-03-31" });
@@ -138,6 +136,11 @@ test("Phase 4 school/college workflows, tenant security, auth and real PostgreSQ
     assert.equal((await request("GET", `/classes/${grade5.id}/subjects`, schoolAdminA)).data.data.length, 1);
     expectStatus(await request("PATCH", `/subjects/${subject.data.data.id}`, schoolAdminA, { description: "Verified subject update" }), 200);
     const studentA = await createStudent(schoolAdminA, schoolA, "school-student");
+    const studentPortalAccount = await request("POST", `/students/${studentA}/portal-account`, schoolAdminA, { email: `${tag.toLowerCase()}-student-portal@example.test`, password });
+    expectStatus(studentPortalAccount, 201);
+    const studentPortal = await login(`${tag.toLowerCase()}-student-portal@example.test`);
+    await prisma.user.create({ data: { firstName: "QA Parent", email: `${tag.toLowerCase()}-parent@example.test`, password: hashed, role: "PARENT", schoolId: schoolA } });
+    const parent = await login(`${tag.toLowerCase()}-parent@example.test`);
     const enrollmentA = await request("POST", `/students/${studentA}/academic-enrollments`, schoolAdminA, { academicYearId: yearId, gradeId: grade5.id, sectionId: sectionA.data.data.id, rollNumber: "QA-5A-1", enrollmentDate: "2026-04-01" });
     expectStatus(enrollmentA, 201);
     expectStatus(await request("POST", `/students/${studentA}/academic-enrollments`, schoolAdminA, { academicYearId: yearId, gradeId: grade5.id, sectionId: sectionA.data.data.id, enrollmentDate: "2026-04-01" }), 409);
@@ -226,8 +229,8 @@ test("Phase 4 school/college workflows, tenant security, auth and real PostgreSQ
     expectStatus(await request("GET", `/programmes/${programme.data.data.id}`, collegeAdminB), 404);
     expectStatus(await request("GET", "/departments", schoolAdminA), 403);
     expectStatus(await request("GET", "/departments", teacherA), 403);
-    expectStatus(await request("GET", "/departments", studentUser), 403);
-    expectStatus(await request("GET", "/departments", parentUser), 403);
+    expectStatus(await request("GET", "/departments", studentPortal), 403);
+    expectStatus(await request("GET", "/departments", parent), 403);
     expectStatus(await request("GET", "/programmes/invalid-id", collegeAdminA), 400);
     expectStatus(await request("POST", `/programme-terms/${term1.id}/courses`, collegeAdminA, { courseId: subject.data.data.id }), 400);
 

@@ -2,7 +2,7 @@ const bcrypt = require("bcrypt");
 const AppError = require("../utils/AppError");
 const { ROLE } = require("../constants/permissions");
 
-const MANAGED_ROLES = new Set(["SCHOOL_ADMIN", "TEACHER", "STUDENT", "PARENT"]);
+const MANAGED_ROLES = new Set(["SCHOOL_ADMIN", "TEACHER"]);
 
 function createUserService({ users: suppliedUsers, schools: suppliedSchools, bcryptLib = bcrypt } = {}) {
   const users = () => suppliedUsers || require("../repositories/user.repository");
