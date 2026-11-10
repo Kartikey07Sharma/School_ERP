@@ -1,0 +1,12 @@
+const express=require("express");
+const {requireAuth,authorizePermission}=require("../middlewares/auth.middleware");
+const validate=require("../middlewares/validate.middleware");
+const c=require("../controllers/school-teacher-assignment.controller");
+const v=require("../validations/school-teacher-assignment.validation");
+const router=express.Router();
+const query=(req,res,next)=>{const x=v.querySchema.safeParse(req.query);if(!x.success)return res.status(400).json({success:false,error:{code:"VALIDATION_ERROR",message:"Request validation failed",details:x.error.issues}});req.validatedQuery=x.data;next();};
+const params=(req,res,next)=>{const x=v.uuid.safeParse(req.params.id);if(!x.success)return res.status(400).json({success:false,error:{code:"VALIDATION_ERROR",message:"Invalid assignment ID"}});next();};
+router.use(requireAuth,authorizePermission("academics:manage:any","academics:manage:school"));
+router.get("/",query,c.list);router.post("/",query,validate(v.createSchema),c.create);
+router.get("/:id",params,query,c.get);router.patch("/:id",params,query,validate(v.updateSchema),c.update);router.patch("/:id/status",params,query,validate(v.statusSchema),c.status);
+module.exports=router;

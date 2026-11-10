@@ -1,0 +1,16 @@
+const express=require("express");
+const {requireAuth,authorizePermission}=require("../middlewares/auth.middleware");
+const validate=require("../middlewares/validate.middleware");
+const c=require("../controllers/employee.controller");
+const v=require("../validations/employee.validation");
+const router=express.Router();
+const query=(req,res,next)=>{const x=v.querySchema.safeParse(req.query);if(!x.success)return res.status(400).json({success:false,error:{code:"VALIDATION_ERROR",message:"Request validation failed",details:x.error.issues}});req.validatedQuery=x.data;next();};
+router.use(requireAuth);
+const read=authorizePermission("employees:read:any","employees:read:school"), manage=authorizePermission("employees:manage:any","employees:manage:school");
+router.get("/departments",read,query,c.listDepartments); router.post("/departments",manage,query,validate(v.lookupSchema.omit({category:true})),c.createDepartment);
+router.get("/designations",read,query,c.listDesignations); router.post("/designations",manage,query,validate(v.lookupSchema),c.createDesignation);
+router.patch("/departments/:id",manage,query,validate(v.departmentUpdateSchema),c.updateDepartment); router.patch("/designations/:id",manage,query,validate(v.lookupUpdateSchema),c.updateDesignation);
+router.get("/",read,query,c.list); router.post("/",manage,query,validate(v.employeeSchema),c.create); router.get("/:id",read,query,c.get); router.patch("/:id",manage,query,validate(v.updateEmployeeSchema),c.update);
+router.get("/:id/teacher-profile",read,query,c.getTeacher); router.post("/:id/teacher-profile",manage,query,validate(v.teacherSchema),c.createTeacher); router.patch("/:id/teacher-profile",manage,query,validate(v.teacherSchema.refine(d=>Object.keys(d).length>0)),c.updateTeacher);
+router.put("/:id/user-account",manage,query,validate(require("zod").z.object({userId:v.uuid}).strict()),c.link); router.delete("/:id/user-account",manage,query,c.unlink);
+module.exports=router;

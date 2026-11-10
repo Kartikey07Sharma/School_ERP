@@ -67,3 +67,15 @@ test("semester generation creates eight ordered B.Tech semesters and is idempote
   assert.deepEqual(rows.map((x) => x.academicYearNumber), [1, 1, 2, 2, 3, 3, 4, 4]);
   assert.deepEqual(rows.map((x) => x.semesterNumber), [1, 2, 3, 4, 5, 6, 7, 8]);
 });
+
+test("new college faculty assignments require an active linked teaching employee and profile",async t=>{
+  const schoolId="00000000-0000-4000-8000-000000000002",offeringId="00000000-0000-4000-8000-000000000020",userId="00000000-0000-4000-8000-000000000021";
+  const old={school:prisma.school.findUnique,offering:prisma.courseOffering.findFirst,user:prisma.user.findFirst,create:prisma.facultyCourseAssignment.create};let eligible=false;const creates=[];
+  prisma.school.findUnique=async()=>({id:schoolId,institutionType:"COLLEGE"});prisma.courseOffering.findFirst=async()=>({id:offeringId,schoolId});prisma.user.findFirst=async q=>{assert.equal(q.where.status,"ACTIVE");assert.ok(q.where.employee.is.teacherProfile.is);return eligible?{id:userId}:null;};prisma.facultyCourseAssignment.create=async q=>(creates.push(q),q.data);
+  t.after(()=>{prisma.school.findUnique=old.school;prisma.courseOffering.findFirst=old.offering;prisma.user.findFirst=old.user;prisma.facultyCourseAssignment.create=old.create;});
+  const input={courseOfferingId:offeringId,userId};const actor={role:"SCHOOL_ADMIN",schoolId};await assert.rejects(service.create("faculty",input,actor),/active teaching employee/);eligible=true;const row=await service.create("faculty",input,actor);assert.equal(row.schoolId,schoolId);assert.equal(creates.length,1);
+});
+
+test("faculty batch filtering is rejected because offerings have no batch key",async t=>{const old=prisma.school.findUnique;prisma.school.findUnique=async()=>({id:"00000000-0000-4000-8000-000000000002",institutionType:"COLLEGE"});t.after(()=>prisma.school.findUnique=old);await assert.rejects(service.list("faculty",{role:"SCHOOL_ADMIN",schoolId:"00000000-0000-4000-8000-000000000002"},{batchId:"00000000-0000-4000-8000-000000000003"}),{code:"BATCH_FILTER_UNSUPPORTED"});});
+
+test("college faculty uniqueness conflicts return a stable 409 domain error",async t=>{const originals={school:prisma.school.findUnique,offering:prisma.courseOffering.findFirst,user:prisma.user.findFirst,create:prisma.facultyCourseAssignment.create};const schoolId="00000000-0000-4000-8000-000000000002",offeringId="00000000-0000-4000-8000-000000000020",userId="00000000-0000-4000-8000-000000000021";prisma.school.findUnique=async()=>({id:schoolId,institutionType:"COLLEGE"});prisma.courseOffering.findFirst=async()=>({id:offeringId,schoolId});prisma.user.findFirst=async()=>({id:userId});prisma.facultyCourseAssignment.create=async()=>{throw{code:"P2002"};};t.after(()=>{prisma.school.findUnique=originals.school;prisma.courseOffering.findFirst=originals.offering;prisma.user.findFirst=originals.user;prisma.facultyCourseAssignment.create=originals.create;});await assert.rejects(service.create("faculty",{courseOfferingId:offeringId,userId},{role:"SCHOOL_ADMIN",schoolId}),{code:"DUPLICATE_FACULTY_ASSIGNMENT",statusCode:409});});

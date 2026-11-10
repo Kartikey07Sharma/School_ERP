@@ -1,0 +1,3 @@
+const service=require("../services/school-teacher-assignment.service");
+const run=(fn,status=200)=>async(req,res,next)=>{try{const data=await fn(req);res.status(status).json({success:true,data});}catch(e){next(e);}};
+module.exports={create:run(r=>service.create(r.body,r.user,r.validatedQuery.schoolId),201),list:run(r=>service.list(r.validatedQuery,r.user)),get:run(r=>service.get(r.params.id,r.user,r.validatedQuery.schoolId)),update:run(r=>service.update(r.params.id,r.body,r.user,r.validatedQuery.schoolId)),status:run(r=>service.setStatus(r.params.id,r.body.status,r.user,r.validatedQuery.schoolId))};

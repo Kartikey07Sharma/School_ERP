@@ -8,6 +8,8 @@ const authRoutes = require("./routes/auth.routes");
 const studentRoutes = require("./routes/student.routes");
 const academicRoutes = require("./routes/academic.routes");
 const collegeRoutes = require("./routes/college.routes");
+const employeeRoutes = require("./routes/employee.routes");
+const schoolTeacherAssignmentRoutes = require("./routes/school-teacher-assignment.routes");
 
 const errorMiddleware = require(
   "./middlewares/error.middleware"
@@ -78,6 +80,8 @@ app.use(
 
 app.use("/api/v1", academicRoutes);
 app.use("/api/v1", collegeRoutes);
+app.use("/api/v1/employees", employeeRoutes);
+app.use("/api/v1/school/teacher-assignments", schoolTeacherAssignmentRoutes);
 
 /**
  * Global Error Handler

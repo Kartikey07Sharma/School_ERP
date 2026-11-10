@@ -1,9 +1,11 @@
 const express = require("express");
+const { z } = require("zod");
 const { requireAuth, authorizePermission } = require("../middlewares/auth.middleware");
 const validate = require("../middlewares/validate.middleware");
 const controller = require("../controllers/college.controller");
 const { schemas, querySchema } = require("../validations/college.validation");
 const router = express.Router();
+const facultyAssignmentId = (req, res, next) => { const result = z.object({ id: z.string().uuid() }).strict().safeParse(req.params); if (!result.success) return res.status(400).json({ success: false, error: { code: "VALIDATION_ERROR", message: "Invalid faculty assignment ID" } }); return next(); };
 const query = (req, res, next) => { const parsed = querySchema.safeParse(req.query); if (!parsed.success) return res.status(400).json({ success: false, error: { code: "VALIDATION_ERROR", message: "Request validation failed", details: parsed.error.issues } }); req.validatedQuery = parsed.data; next(); };
 router.use(requireAuth, authorizePermission("college-academics:manage:any", "college-academics:manage:college"));
 const crud = (path, entity, schema) => { router.get(`/${path}`, query, controller.list(entity)); router.post(`/${path}`, query, validate(schema), controller.create(entity)); router.get(`/${path}/:id`, query, controller.get(entity)); router.patch(`/${path}/:id`, query, validate(schema.partial()), controller.update(entity)); };
@@ -48,5 +50,7 @@ router.get("/students/:studentId/course-registrations", query, injectQuery("stud
 router.patch("/course-registrations/:id", query, validate(schemas.registrationStatus), controller.update("registrations"));
 router.get("/course-offerings/:offeringId/faculty", query, injectQuery("courseOfferingId", "offeringId"), controller.list("faculty"));
 router.post("/course-offerings/:offeringId/faculty", query, injectBody("courseOfferingId", "offeringId"), validate(schemas.faculty.extend({ courseOfferingId: schemas.programmes.shape.departmentId })), controller.create("faculty"));
-router.patch("/faculty-assignments/:id/status", query, validate(schemas.academicStatus), controller.update("faculty"));
+router.get("/faculty-assignments/:id", facultyAssignmentId, query, controller.get("faculty"));
+router.patch("/faculty-assignments/:id", facultyAssignmentId, query, validate(schemas.facultyUpdate), controller.update("faculty"));
+router.patch("/faculty-assignments/:id/status", facultyAssignmentId, query, validate(schemas.academicStatus), controller.update("faculty"));
 module.exports = router;

@@ -38,6 +38,24 @@ enum StudentStatus {
   WITHDRAWN
 }
 
+enum EmployeeCategory {
+  TEACHING
+  NON_TEACHING
+}
+
+enum EmploymentStatus {
+  ACTIVE
+  INACTIVE
+  ON_LEAVE
+  TERMINATED
+  RESIGNED
+}
+
+enum EmployeeRecordStatus {
+  ACTIVE
+  INACTIVE
+}
+
 enum AcademicStatus {
   ACTIVE
   INACTIVE
@@ -132,26 +150,30 @@ model School {
 
   status SchoolStatus @default(ACTIVE)
 
-  users                User[]
-  students             Student[]
-  academicYears        AcademicYear[]
-  academicPeriods      AcademicPeriod[]
-  grades               Grade[]
-  subjects             Subject[]
-  sections             Section[]
-  enrollments          StudentAcademicEnrollment[]
-  departments          Department[]
-  programmes           Programme[]
-  curricula            CurriculumVersion[]
-  programmeTerms       ProgrammeTerm[]
-  collegeCourses       CollegeCourse[]
-  curriculumCourses    CurriculumCourse[]
-  collegeBatches       CollegeBatch[]
-  programmeEnrollments StudentProgrammeEnrollment[]
-  semesterEnrollments  StudentSemesterEnrollment[]
-  courseOfferings      CourseOffering[]
-  courseRegistrations  StudentCourseRegistration[]
-  facultyAssignments   FacultyCourseAssignment[]
+  users                    User[]
+  students                 Student[]
+  academicYears            AcademicYear[]
+  academicPeriods          AcademicPeriod[]
+  grades                   Grade[]
+  subjects                 Subject[]
+  sections                 Section[]
+  enrollments              StudentAcademicEnrollment[]
+  departments              Department[]
+  programmes               Programme[]
+  curricula                CurriculumVersion[]
+  programmeTerms           ProgrammeTerm[]
+  collegeCourses           CollegeCourse[]
+  curriculumCourses        CurriculumCourse[]
+  collegeBatches           CollegeBatch[]
+  programmeEnrollments     StudentProgrammeEnrollment[]
+  semesterEnrollments      StudentSemesterEnrollment[]
+  courseOfferings          CourseOffering[]
+  courseRegistrations      StudentCourseRegistration[]
+  facultyAssignments       FacultyCourseAssignment[]
+  employees                Employee[]
+  employeeDepartments      EmployeeDepartment[]
+  employeeDesignations     EmployeeDesignation[]
+  schoolTeacherAssignments SchoolTeacherAssignment[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -183,6 +205,7 @@ model User {
   school             School?                   @relation(fields: [schoolId], references: [id], onDelete: Restrict)
   student            Student?
   facultyAssignments FacultyCourseAssignment[]
+  employee           Employee?
 
   authVersion Int @default(0)
 
@@ -192,6 +215,106 @@ model User {
   @@unique([schoolId, id])
   @@index([schoolId])
   @@map("users")
+}
+
+model EmployeeDepartment {
+  id          String               @id @default(uuid())
+  schoolId    String
+  name        String
+  code        String
+  description String?
+  status      EmployeeRecordStatus @default(ACTIVE)
+  school      School               @relation(fields: [schoolId], references: [id], onDelete: Restrict)
+  employees   Employee[]
+  createdAt   DateTime             @default(now())
+  updatedAt   DateTime             @updatedAt
+
+  @@unique([schoolId, code])
+  @@unique([schoolId, name])
+  @@unique([schoolId, id])
+  @@index([schoolId, status])
+  @@map("employee_departments")
+}
+
+model EmployeeDesignation {
+  id        String               @id @default(uuid())
+  schoolId  String
+  name      String
+  code      String
+  category  EmployeeCategory?
+  status    EmployeeRecordStatus @default(ACTIVE)
+  school    School               @relation(fields: [schoolId], references: [id], onDelete: Restrict)
+  employees Employee[]
+  createdAt DateTime             @default(now())
+  updatedAt DateTime             @updatedAt
+
+  @@unique([schoolId, code])
+  @@unique([schoolId, name])
+  @@unique([schoolId, id])
+  @@index([schoolId, status, category])
+  @@map("employee_designations")
+}
+
+model Employee {
+  id                           String              @id @default(uuid())
+  schoolId                     String
+  employeeId                   String
+  category                     EmployeeCategory
+  status                       EmploymentStatus    @default(ACTIVE)
+  firstName                    String
+  middleName                   String?
+  lastName                     String
+  dateOfBirth                  DateTime?           @db.Date
+  gender                       String?
+  email                        String?
+  phone                        String
+  alternatePhone               String?
+  address                      String?
+  city                         String?
+  state                        String?
+  postalCode                   String?
+  emergencyContactName         String?
+  emergencyContactRelationship String?
+  emergencyContactPhone        String?
+  joiningDate                  DateTime            @db.Date
+  relievingDate                DateTime?           @db.Date
+  departmentId                 String?
+  designationId                String
+  userId                       String?             @unique
+  school                       School              @relation(fields: [schoolId], references: [id], onDelete: Restrict)
+  department                   EmployeeDepartment? @relation(fields: [schoolId, departmentId], references: [schoolId, id], onDelete: Restrict)
+  designation                  EmployeeDesignation @relation(fields: [schoolId, designationId], references: [schoolId, id], onDelete: Restrict)
+  user                         User?               @relation(fields: [schoolId, userId], references: [schoolId, id], onDelete: Restrict)
+  teacherProfile               TeacherProfile?
+  createdAt                    DateTime            @default(now())
+  updatedAt                    DateTime            @updatedAt
+
+  @@unique([schoolId, employeeId])
+  @@unique([schoolId, id])
+  @@unique([schoolId, userId])
+  @@index([schoolId, status, category])
+  @@index([schoolId, departmentId, designationId])
+  @@index([schoolId, lastName, firstName])
+  @@map("employees")
+}
+
+model TeacherProfile {
+  id                String                    @id @default(uuid())
+  schoolId          String
+  employeeId        String                    @unique
+  qualifications    String?
+  specialization    String?
+  experienceYears   Int?
+  status            EmployeeRecordStatus      @default(ACTIVE)
+  employee          Employee                  @relation(fields: [schoolId, employeeId], references: [schoolId, id], onDelete: Restrict)
+  schoolAssignments SchoolTeacherAssignment[]
+  createdAt         DateTime                  @default(now())
+  updatedAt         DateTime                  @updatedAt
+
+  @@unique([schoolId, id])
+  @@unique([schoolId, employeeId])
+  @@index([schoolId, status])
+  @@map("teacher_profiles")
 }
 
 model Student {
@@ -250,10 +373,12 @@ model AcademicYear {
   enrollments         StudentAcademicEnrollment[]
   semesterEnrollments StudentSemesterEnrollment[]
   courseOfferings     CourseOffering[]
+  teacherAssignments  SchoolTeacherAssignment[]
   createdAt           DateTime                    @default(now())
   updatedAt           DateTime                    @updatedAt
 
   @@unique([schoolId, name])
+  @@unique([schoolId, id])
   @@index([schoolId, status])
   @@index([schoolId, isCurrent])
   @@map("academic_years")
@@ -283,63 +408,69 @@ model AcademicPeriod {
 }
 
 model Grade {
-  id              String                      @id @default(uuid())
-  code            String
-  name            String
-  sequence        Int
-  description     String?
-  status          AcademicStatus              @default(ACTIVE)
-  schoolId        String
-  school          School                      @relation(fields: [schoolId], references: [id], onDelete: Restrict)
-  sections        Section[]
-  subjectMappings ClassSubject[]
-  enrollments     StudentAcademicEnrollment[]
-  createdAt       DateTime                    @default(now())
-  updatedAt       DateTime                    @updatedAt
+  id                 String                      @id @default(uuid())
+  code               String
+  name               String
+  sequence           Int
+  description        String?
+  status             AcademicStatus              @default(ACTIVE)
+  schoolId           String
+  school             School                      @relation(fields: [schoolId], references: [id], onDelete: Restrict)
+  sections           Section[]
+  subjectMappings    ClassSubject[]
+  enrollments        StudentAcademicEnrollment[]
+  teacherAssignments SchoolTeacherAssignment[]
+  createdAt          DateTime                    @default(now())
+  updatedAt          DateTime                    @updatedAt
 
   @@unique([schoolId, code])
   @@unique([schoolId, sequence])
+  @@unique([schoolId, id])
   @@index([schoolId, status])
   @@map("grades")
 }
 
 model Section {
-  id             String                      @id @default(uuid())
-  name           String
-  code           String
-  capacity       Int?
-  roomNumber     String?
-  status         AcademicStatus              @default(ACTIVE)
-  schoolId       String
-  gradeId        String
-  academicYearId String
-  school         School                      @relation(fields: [schoolId], references: [id], onDelete: Restrict)
-  grade          Grade                       @relation(fields: [gradeId], references: [id], onDelete: Restrict)
-  academicYear   AcademicYear                @relation(fields: [academicYearId], references: [id], onDelete: Restrict)
-  enrollments    StudentAcademicEnrollment[]
-  createdAt      DateTime                    @default(now())
-  updatedAt      DateTime                    @updatedAt
+  id                 String                      @id @default(uuid())
+  name               String
+  code               String
+  capacity           Int?
+  roomNumber         String?
+  status             AcademicStatus              @default(ACTIVE)
+  schoolId           String
+  gradeId            String
+  academicYearId     String
+  school             School                      @relation(fields: [schoolId], references: [id], onDelete: Restrict)
+  grade              Grade                       @relation(fields: [gradeId], references: [id], onDelete: Restrict)
+  academicYear       AcademicYear                @relation(fields: [academicYearId], references: [id], onDelete: Restrict)
+  enrollments        StudentAcademicEnrollment[]
+  teacherAssignments SchoolTeacherAssignment[]
+  createdAt          DateTime                    @default(now())
+  updatedAt          DateTime                    @updatedAt
 
   @@unique([gradeId, academicYearId, name])
   @@unique([gradeId, academicYearId, code])
+  @@unique([schoolId, gradeId, academicYearId, id])
   @@index([schoolId, academicYearId, gradeId, status])
   @@map("sections")
 }
 
 model Subject {
-  id          String         @id @default(uuid())
-  name        String
-  code        String
-  description String?
-  subjectType SubjectType    @default(CORE)
-  status      AcademicStatus @default(ACTIVE)
-  schoolId    String
-  school      School         @relation(fields: [schoolId], references: [id], onDelete: Restrict)
-  mappings    ClassSubject[]
-  createdAt   DateTime       @default(now())
-  updatedAt   DateTime       @updatedAt
+  id                 String                    @id @default(uuid())
+  name               String
+  code               String
+  description        String?
+  subjectType        SubjectType               @default(CORE)
+  status             AcademicStatus            @default(ACTIVE)
+  schoolId           String
+  school             School                    @relation(fields: [schoolId], references: [id], onDelete: Restrict)
+  mappings           ClassSubject[]
+  teacherAssignments SchoolTeacherAssignment[]
+  createdAt          DateTime                  @default(now())
+  updatedAt          DateTime                  @updatedAt
 
   @@unique([schoolId, code])
+  @@unique([schoolId, id])
   @@index([schoolId, status, subjectType])
   @@map("subjects")
 }
@@ -362,6 +493,31 @@ model ClassSubject {
   @@index([schoolId, gradeId, status])
   @@index([schoolId, subjectId, status])
   @@map("class_subjects")
+}
+
+model SchoolTeacherAssignment {
+  id               String         @id @default(uuid())
+  schoolId         String
+  teacherProfileId String
+  academicYearId   String
+  gradeId          String
+  sectionId        String
+  subjectId        String
+  status           AcademicStatus @default(ACTIVE)
+  school           School         @relation(fields: [schoolId], references: [id], onDelete: Restrict)
+  teacherProfile   TeacherProfile @relation(fields: [schoolId, teacherProfileId], references: [schoolId, id], onDelete: Restrict)
+  academicYear     AcademicYear   @relation(fields: [schoolId, academicYearId], references: [schoolId, id], onDelete: Restrict)
+  grade            Grade          @relation(fields: [schoolId, gradeId], references: [schoolId, id], onDelete: Restrict)
+  section          Section        @relation(fields: [schoolId, gradeId, academicYearId, sectionId], references: [schoolId, gradeId, academicYearId, id], onDelete: Restrict)
+  subject          Subject        @relation(fields: [schoolId, subjectId], references: [schoolId, id], onDelete: Restrict)
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+
+  @@unique([schoolId, id])
+  @@index([schoolId, academicYearId, gradeId, sectionId, status])
+  @@index([schoolId, teacherProfileId, status])
+  @@index([schoolId, subjectId, status])
+  @@map("school_teacher_assignments")
 }
 
 model StudentAcademicEnrollment {

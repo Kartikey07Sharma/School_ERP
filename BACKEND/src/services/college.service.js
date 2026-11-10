@@ -7,6 +7,40 @@ const models = {
 };
 const fail = (message, status = 400, code = "VALIDATION_ERROR") => { throw new AppError(message, status, code); };
 const ensureId = (id) => { if (typeof id !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id)) fail("Invalid record ID."); };
+const facultyInclude = {
+  user: {
+    select: {
+      id: true, firstName: true, lastName: true, email: true,
+      employee: {
+        select: {
+          id: true, employeeId: true, firstName: true, lastName: true,
+          teacherProfile: { select: { id: true, specialization: true } },
+        },
+      },
+    },
+  },
+  courseOffering: {
+    include: {
+      academicYear: { select: { id: true, name: true } },
+      programmeTerm: {
+        select: {
+          id: true, name: true, semesterNumber: true,
+          curriculumVersion: {
+            select: {
+              programme: {
+                select: {
+                  id: true, name: true,
+                  department: { select: { id: true, name: true } },
+                },
+              },
+            },
+          },
+        },
+      },
+      curriculumCourse: { include: { course: { select: { id: true, name: true, code: true } } } },
+    },
+  },
+};
 
 async function context(actor, requestedSchoolId) {
   if (!actor) fail("Authentication required", 401, "UNAUTHENTICATED");
@@ -36,12 +70,13 @@ const checks = {
   semesterEnrollments: async (d, s) => { const [e, t, y] = await Promise.all([findOwned("programmeEnrollments", d.programmeEnrollmentId, s), findOwned("terms", d.programmeTermId, s), prisma.academicYear.findFirst({ where: { id: d.academicYearId, schoolId: s } })]); if (!e || !t || !y || e.curriculumVersionId !== t.curriculumVersionId) fail("Programme enrolment, term and academic year must belong to this college and match."); if (d.enrollmentDate < y.startDate || d.enrollmentDate > y.endDate || (d.completionDate && (d.completionDate < d.enrollmentDate || d.completionDate > y.endDate))) fail("Semester enrolment dates must fall within the selected academic year."); },
   offerings: async (d, s) => { const [m, t, y] = await Promise.all([findOwned("mappings", d.curriculumCourseId, s), findOwned("terms", d.programmeTermId, s), prisma.academicYear.findFirst({ where: { id: d.academicYearId, schoolId: s } })]); if (!m || !t || !y || m.programmeTermId !== t.id) fail("Course mapping, programme term and academic year must belong to this college and match."); },
   registrations: async (d, s) => { const [e, o] = await Promise.all([prisma.studentSemesterEnrollment.findFirst({ where: { id: d.studentSemesterEnrollmentId, schoolId: s }, include: { programmeEnrollment: true } }), prisma.courseOffering.findFirst({ where: { id: d.courseOfferingId, schoolId: s }, include: { curriculumCourse: true } })]); if (!e || !o || e.programmeTermId !== o.programmeTermId || e.academicYearId !== o.academicYearId || e.programmeEnrollment.curriculumVersionId !== o.curriculumCourse.curriculumVersionId) fail("Student is not eligible for this course offering."); },
-  faculty: async (d, s) => { const [o, u] = await Promise.all([findOwned("offerings", d.courseOfferingId, s), prisma.user.findFirst({ where: { id: d.userId, schoolId: s }, select: { id: true, role: true } })]); if (!o || !u || u.role !== "TEACHER") fail("Faculty user and offering must belong to this college; user must have TEACHER role."); },
+  faculty: async (d, s) => { const [o, u] = await Promise.all([findOwned("offerings", d.courseOfferingId, s), prisma.user.findFirst({ where: { id: d.userId, schoolId: s, role: "TEACHER", status: "ACTIVE", employee: { is: { schoolId: s, category: "TEACHING", status: "ACTIVE", teacherProfile: { is: { status: "ACTIVE" } } } } }, select: { id: true } })]); if (!o || !u) fail("Faculty user and offering must belong to this college; user must have an active teaching employee and TeacherProfile."); },
 };
 
 async function list(entity, actor, query = {}) {
   const schoolId = await context(actor, query.schoolId);
-  for (const key of ["programmeId", "departmentId", "curriculumVersionId", "programmeTermId", "courseId", "academicYearId", "batchId", "studentId", "courseOfferingId", "studentSemesterEnrollmentId", "programmeEnrollmentId"]) if (query[key]) ensureId(query[key]);
+  for (const key of ["programmeId", "departmentId", "curriculumVersionId", "programmeTermId", "courseId", "academicYearId", "batchId", "studentId", "courseOfferingId", "studentSemesterEnrollmentId", "programmeEnrollmentId", "employeeId", "userId"]) if (query[key]) ensureId(query[key]);
+  if (entity === "faculty" && query.batchId) fail("Batch filtering is unavailable for faculty assignments because course offerings are not linked directly to batches.", 400, "BATCH_FILTER_UNSUPPORTED");
   const parentChecks = {
     curricula: ["programmeId", "programmes"],
     terms: ["curriculumVersionId", "curricula"],
@@ -55,8 +90,21 @@ async function list(entity, actor, query = {}) {
   if (["programmeEnrollments", "registrations"].includes(entity) && query.studentId && !await prisma.student.findFirst({ where: { id: query.studentId, schoolId }, select: { id: true } })) fail("Student not found", 404, "NOT_FOUND");
   let where = { schoolId };
   const filters = { status: "status", programmeId: "programmeId", departmentId: "departmentId", curriculumVersionId: "curriculumVersionId", programmeTermId: "programmeTermId", courseId: "courseId", admissionYear: "admissionYear", academicYearId: "academicYearId", batchId: "batchId", studentId: "studentId", courseOfferingId: "courseOfferingId", studentSemesterEnrollmentId: "studentSemesterEnrollmentId" };
-  for (const [input, field] of Object.entries(filters)) if (query[input] && !(entity === "registrations" && input === "studentId")) where[field] = query[input];
+  for (const [input, field] of Object.entries(filters)) if (query[input] && !(entity === "registrations" && input === "studentId") && !(entity === "faculty" && input !== "status")) where[field] = query[input];
+  if (entity === "faculty") {
+    if (query.userId) where.userId = query.userId;
+    if (query.employeeId) where.user = { employee: { is: { id: query.employeeId, schoolId } } };
+    const offering = {};
+    if (query.courseOfferingId) offering.id = query.courseOfferingId;
+    if (query.academicYearId) offering.academicYearId = query.academicYearId;
+    if (query.programmeTermId) offering.programmeTermId = query.programmeTermId;
+    if (query.courseId) offering.curriculumCourse = { courseId: query.courseId };
+    if (query.programmeId || query.departmentId || query.curriculumVersionId) offering.curriculumCourse = { ...(offering.curriculumCourse || {}), curriculumVersion: { ...(query.curriculumVersionId ? { id: query.curriculumVersionId } : {}), ...(query.programmeId ? { programmeId: query.programmeId } : {}), ...(query.departmentId ? { programme: { departmentId: query.departmentId } } : {}) } };
+    if (query.batchId) offering.curriculumCourse = { ...(offering.curriculumCourse || {}), curriculumVersion: { ...(offering.curriculumCourse?.curriculumVersion || {}), batches: { some: { id: query.batchId, schoolId } } } };
+    if (Object.keys(offering).length) where.courseOffering = offering;
+  }
   if (query.search && ["departments", "programmes", "courses", "batches"].includes(entity)) where.OR = ["name", "code"].map((field) => ({ [field]: { contains: query.search, mode: "insensitive" } }));
+  if (query.search && entity === "faculty") where.user = { ...(where.user || {}), employee: { is: { ...(where.user?.employee?.is || {}), OR: ["employeeId", "firstName", "lastName"].map((field) => ({ [field]: { contains: query.search, mode: "insensitive" } })) } } };
   if (entity === "semesterEnrollments" && query.programmeEnrollmentId) where.programmeEnrollmentId = query.programmeEnrollmentId;
   if (entity === "registrations" && query.studentId) where.semesterEnrollment = { is: { programmeEnrollment: { is: { studentId: query.studentId } } } };
   const model = prisma[models[entity]]; if (!model) fail("College academic resource not found", 404, "NOT_FOUND");
@@ -65,14 +113,21 @@ async function list(entity, actor, query = {}) {
     if (!statuses[entity]?.includes(query.status)) fail("Invalid status filter for this resource.");
   }
   const page = query.page || 1, limit = query.limit || 50;
-  const [total, records] = await prisma.$transaction([model.count({ where }), model.findMany({ where, orderBy: { createdAt: "desc" }, skip: (page - 1) * limit, take: limit })]);
+  const [total, records] = await prisma.$transaction([model.count({ where }), model.findMany({ where, orderBy: { createdAt: "desc" }, skip: (page - 1) * limit, take: limit, ...(entity === "faculty" ? { include: facultyInclude } : {}) })]);
   return { records, page, pageSize: limit, total, totalPages: Math.ceil(total / limit) };
 }
-async function get(entity, id, actor, requestedSchoolId) { const schoolId = await context(actor, requestedSchoolId); const row = await findOwned(entity, id, schoolId); if (!row) fail("Record not found", 404, "NOT_FOUND"); return row; }
+async function get(entity, id, actor, requestedSchoolId) {
+  const schoolId = await context(actor, requestedSchoolId);
+  const row = entity === "faculty"
+    ? await prisma.facultyCourseAssignment.findFirst({ where: { id, schoolId }, include: facultyInclude })
+    : await findOwned(entity, id, schoolId);
+  if (!row) fail("Record not found", 404, "NOT_FOUND");
+  return row;
+}
 async function create(entity, input, actor, requestedSchoolId) {
   const schoolId = await context(actor, requestedSchoolId || input.schoolId); const data = { ...input }; delete data.schoolId;
   if (entity === "mappings") { const term = await findOwned("terms", data.programmeTermId, schoolId); if (!term) fail("Programme term does not belong to this college."); if (data.curriculumVersionId && data.curriculumVersionId !== term.curriculumVersionId) fail("Programme term does not belong to the selected curriculum."); data.curriculumVersionId = term.curriculumVersionId; }
-  if (checks[entity]) await checks[entity](data, schoolId);
+  if (checks[entity] && (entity !== "faculty" || (data.status || "ACTIVE") === "ACTIVE")) await checks[entity](data, schoolId);
   if (entity === "mappings") { const course = await findOwned("courses", data.courseId, schoolId); data.courseType ??= course.courseType; data.credits ??= course.credits; data.lectureHours ??= course.lectureHours; data.tutorialHours ??= course.tutorialHours; data.practicalHours ??= course.practicalHours; }
   if (entity === "programmes" || entity === "curricula") validateProgramStructure({ ...data, termMode: data.termMode || "SEMESTER" });
   const model = prisma[models[entity]]; if (!model) fail("College academic resource not found", 404, "NOT_FOUND");
@@ -85,14 +140,16 @@ async function create(entity, input, actor, requestedSchoolId) {
   if (entity === "offerings" && data.capacity === 0) fail("Offering capacity must be positive.");
   if (entity === "programmeEnrollments" && (data.status || "ACTIVE") === "ACTIVE") { const active = await prisma.studentProgrammeEnrollment.findFirst({ where: { studentId: data.studentId, programmeId: data.programmeId, schoolId, status: "ACTIVE" } }); if (active) fail("Student already has an active enrolment in this programme.", 409, "DUPLICATE_ENROLMENT"); }
   if (entity === "registrations" && (data.status || "REGISTERED") === "REGISTERED") return prisma.$transaction(async (tx) => { const offering = await tx.courseOffering.findFirst({ where: { id: data.courseOfferingId, schoolId } }); if (offering.capacity) { const count = await tx.studentCourseRegistration.count({ where: { schoolId, courseOfferingId: offering.id, status: "REGISTERED" } }); if (count >= offering.capacity) fail("Course offering capacity has been reached.", 409, "CAPACITY_REACHED"); } return tx.studentCourseRegistration.create({ data: { ...data, schoolId } }); }, { isolationLevel: "Serializable" });
-  return model.create({ data: { ...data, schoolId } });
+  try { return await model.create({ data: { ...data, schoolId } }); }
+  catch (err) { if (entity === "faculty" && err.code === "P2002") fail("Faculty member is already assigned to this course offering", 409, "DUPLICATE_FACULTY_ASSIGNMENT"); throw err; }
 }
 async function update(entity, id, input, actor, requestedSchoolId) {
-  const schoolId = await context(actor, requestedSchoolId || input.schoolId); delete input.schoolId;
+  const targetSchoolId = requestedSchoolId || input.schoolId;
+  const schoolId = await context(actor, targetSchoolId); delete input.schoolId;
   if (!Object.keys(input).length) fail("At least one updatable field is required.");
   const current = await findOwned(entity, id, schoolId); if (!current) fail("Record not found", 404, "NOT_FOUND"); const merged = { ...current, ...input };
   if (entity === "curricula" && Object.keys(input).some((key) => key !== "status")) { const used = await prisma.studentProgrammeEnrollment.count({ where: { curriculumVersionId: id, schoolId } }); if (used) fail("A curriculum version used by students is immutable.", 409, "CURRICULUM_IN_USE"); }
-  if (checks[entity]) await checks[entity](merged, schoolId);
+  if (checks[entity] && !(entity === "faculty" && input.status === "INACTIVE")) await checks[entity](merged, schoolId);
   const allowed = {
     departments: ["name", "description", "status"],
     programmes: ["name", "description", "status", "durationYears", "semestersPerYear", "totalSemesters", "totalCredits", "termMode", "entryType", "degreeType"],
@@ -105,7 +162,7 @@ async function update(entity, id, input, actor, requestedSchoolId) {
     semesterEnrollments: ["completionDate", "remarks", "status"],
     offerings: ["code", "capacity", "status"],
     registrations: ["status"],
-    faculty: ["status"],
+    faculty: ["status", "userId", "courseOfferingId"],
   };
   const unsupported = Object.keys(input).filter((key) => !allowed[entity]?.includes(key));
   if (unsupported.length) fail(`These fields cannot be changed through this endpoint: ${unsupported.join(", ")}`);
@@ -117,9 +174,11 @@ async function update(entity, id, input, actor, requestedSchoolId) {
   if (entity === "offerings" && data.capacity != null) { const registered = await prisma.studentCourseRegistration.count({ where: { courseOfferingId: id, schoolId, status: "REGISTERED" } }); if (registered > data.capacity) fail("Capacity cannot be lower than the current registration count.", 409, "CAPACITY_CONFLICT"); }
   if (entity === "programmeEnrollments" && data.status === "ACTIVE") { const active = await prisma.studentProgrammeEnrollment.findFirst({ where: { id: { not: id }, studentId: current.studentId, programmeId: current.programmeId, schoolId, status: "ACTIVE" } }); if (active) fail("Student already has an active enrolment in this programme.", 409, "DUPLICATE_ENROLMENT"); }
   if (entity === "registrations" && data.status === "REGISTERED") { const offering = await findOwned("offerings", current.courseOfferingId, schoolId); if (offering.capacity) { const count = await prisma.studentCourseRegistration.count({ where: { id: { not: id }, schoolId, courseOfferingId: current.courseOfferingId, status: "REGISTERED" } }); if (count >= offering.capacity) fail("Course offering capacity has been reached.", 409, "CAPACITY_REACHED"); } }
-  const changed = await prisma[models[entity]].updateMany({ where: { id, schoolId }, data });
+  let changed;
+  try { changed = await prisma[models[entity]].updateMany({ where: { id, schoolId }, data }); }
+  catch (err) { if (entity === "faculty" && err.code === "P2002") fail("Faculty member is already assigned to this course offering", 409, "DUPLICATE_FACULTY_ASSIGNMENT"); throw err; }
   if (!changed.count) fail("Record not found", 404, "NOT_FOUND");
-  return findOwned(entity, id, schoolId);
+  return entity === "faculty" ? get(entity, id, actor, targetSchoolId) : findOwned(entity, id, schoolId);
 }
 async function generateTerms(curriculumId, actor, requestedSchoolId) {
   const schoolId = await context(actor, requestedSchoolId); const c = await findOwned("curricula", curriculumId, schoolId); if (!c) fail("Curriculum version not found", 404, "NOT_FOUND");
