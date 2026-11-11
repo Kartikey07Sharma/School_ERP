@@ -1,0 +1,32 @@
+-- Align attendance object names with Prisma's generated names. This migration
+-- changes identifiers only; constraints and indexes remain equivalent.
+ALTER TABLE "college_attendance_sessions" RENAME CONSTRAINT "college_attendance_sessions_creator_fkey" TO "college_attendance_sessions_createdById_fkey";
+ALTER TABLE "college_attendance_sessions" RENAME CONSTRAINT "college_attendance_sessions_offering_fkey" TO "college_attendance_sessions_schoolId_courseOfferingId_fkey";
+ALTER TABLE "college_student_attendance" RENAME CONSTRAINT "college_student_attendance_marker_fkey" TO "college_student_attendance_markedById_fkey";
+ALTER TABLE "college_student_attendance" RENAME CONSTRAINT "college_student_attendance_registration_fkey" TO "college_student_attendance_schoolId_courseOfferingId_regis_fkey";
+ALTER TABLE "college_student_attendance" RENAME CONSTRAINT "college_student_attendance_session_fkey" TO "college_student_attendance_schoolId_courseOfferingId_sessi_fkey";
+ALTER TABLE "college_student_attendance" RENAME CONSTRAINT "college_student_attendance_student_fkey" TO "college_student_attendance_schoolId_studentId_fkey";
+ALTER TABLE "school_student_attendance" RENAME CONSTRAINT "school_student_attendance_enrollment_fkey" TO "school_student_attendance_schoolId_enrollmentId_studentId_fkey";
+ALTER TABLE "school_student_attendance" RENAME CONSTRAINT "school_student_attendance_grade_fkey" TO "school_student_attendance_schoolId_gradeId_fkey";
+ALTER TABLE "school_student_attendance" RENAME CONSTRAINT "school_student_attendance_marker_fkey" TO "school_student_attendance_markedById_fkey";
+ALTER TABLE "school_student_attendance" RENAME CONSTRAINT "school_student_attendance_section_fkey" TO "school_student_attendance_schoolId_gradeId_academicYearId__fkey";
+ALTER TABLE "school_student_attendance" RENAME CONSTRAINT "school_student_attendance_student_fkey" TO "school_student_attendance_schoolId_studentId_fkey";
+ALTER TABLE "school_student_attendance" RENAME CONSTRAINT "school_student_attendance_year_fkey" TO "school_student_attendance_schoolId_academicYearId_fkey";
+ALTER TABLE "student_attendance_corrections" RENAME CONSTRAINT "student_attendance_corrections_college_attendance_fkey" TO "student_attendance_corrections_schoolId_collegeAttendanceI_fkey";
+ALTER TABLE "student_attendance_corrections" RENAME CONSTRAINT "student_attendance_corrections_school_attendance_fkey" TO "student_attendance_corrections_schoolId_schoolAttendanceId_fkey";
+ALTER TABLE "student_attendance_corrections" RENAME CONSTRAINT "student_attendance_corrections_school_fkey" TO "student_attendance_corrections_schoolId_fkey";
+ALTER TABLE "student_attendance_corrections" RENAME CONSTRAINT "student_attendance_corrections_user_fkey" TO "student_attendance_corrections_correctedById_fkey";
+ALTER TABLE "staff_attendance" RENAME CONSTRAINT "staff_attendance_checkin_recorder_fkey" TO "staff_attendance_checkInRecordedById_fkey";
+ALTER TABLE "staff_attendance" RENAME CONSTRAINT "staff_attendance_checkout_recorder_fkey" TO "staff_attendance_checkOutRecordedById_fkey";
+ALTER TABLE "staff_attendance" RENAME CONSTRAINT "staff_attendance_department_fkey" TO "staff_attendance_schoolId_departmentId_fkey";
+ALTER TABLE "staff_attendance" RENAME CONSTRAINT "staff_attendance_designation_fkey" TO "staff_attendance_schoolId_designationId_fkey";
+ALTER TABLE "staff_attendance" RENAME CONSTRAINT "staff_attendance_employee_fkey" TO "staff_attendance_schoolId_employeeId_fkey";
+ALTER TABLE "staff_attendance" RENAME CONSTRAINT "staff_attendance_marker_fkey" TO "staff_attendance_markedById_fkey";
+ALTER TABLE "staff_attendance_corrections" RENAME CONSTRAINT "staff_attendance_corrections_attendance_fkey" TO "staff_attendance_corrections_schoolId_attendanceId_fkey";
+ALTER TABLE "staff_attendance_corrections" RENAME CONSTRAINT "staff_attendance_corrections_user_fkey" TO "staff_attendance_corrections_correctedById_fkey";
+
+ALTER INDEX "college_attendance_sessions_schoolId_courseOfferingId_sessionDa" RENAME TO "college_attendance_sessions_schoolId_courseOfferingId_sessi_idx";
+ALTER INDEX "school_student_attendance_schoolId_academicYearId_gradeId_secti" RENAME TO "school_student_attendance_schoolId_academicYearId_gradeId_s_idx";
+ALTER INDEX "staff_attendance_corrections_schoolId_attendanceId_correctedAt_" RENAME TO "staff_attendance_corrections_schoolId_attendanceId_correcte_idx";
+ALTER INDEX "student_attendance_corrections_schoolId_collegeAttendanceId_cor" RENAME TO "student_attendance_corrections_schoolId_collegeAttendanceId_idx";
+ALTER INDEX "student_attendance_corrections_schoolId_schoolAttendanceId_corr" RENAME TO "student_attendance_corrections_schoolId_schoolAttendanceId__idx";

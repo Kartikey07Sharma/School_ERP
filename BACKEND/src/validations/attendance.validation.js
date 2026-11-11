@@ -1,0 +1,13 @@
+const { z } = require("zod");
+const uuid = z.string().uuid();
+const date = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine((v) => { const d = new Date(`${v}T00:00:00.000Z`); return !Number.isNaN(d.valueOf()) && d.toISOString().slice(0, 10) === v; }, "Use a valid calendar date (YYYY-MM-DD)").transform((v) => new Date(`${v}T00:00:00.000Z`));
+const status = z.enum(["PRESENT", "ABSENT", "LATE", "LEAVE"]);
+const entry = z.object({ studentId: uuid, status, remarks: z.string().trim().max(500).nullable().optional() }).strict();
+const uniqueEntries = (v) => new Set(v.map((x) => x.studentId)).size === v.length;
+const schoolRoster = z.object({ schoolId: uuid.optional(), academicYearId: uuid, gradeId: uuid, sectionId: uuid, date }).strict();
+const schoolMark = schoolRoster.extend({ attendance: z.array(entry).min(1).max(100) }).strict().refine((v) => uniqueEntries(v.attendance), { path: ["attendance"], message: "Student IDs must be unique" });
+const collegeSession = z.object({ schoolId: uuid.optional(), courseOfferingId: uuid, sessionDate: date, startTime: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/).optional(), endTime: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/).optional(), sessionType: z.enum(["THEORY", "PRACTICAL", "LAB", "OTHER"]).default("THEORY"), sessionNumber: z.number().int().positive().optional(), remarks: z.string().trim().max(500).optional() }).strict().refine((v) => !v.startTime || !v.endTime || v.startTime < v.endTime, { path: ["endTime"], message: "End time must be after start time" });
+const collegeMark = z.object({ schoolId: uuid.optional(), attendance: z.array(entry).min(1).max(200) }).strict().refine((v) => uniqueEntries(v.attendance), { path: ["attendance"], message: "Student IDs must be unique" });
+const correction = z.object({ schoolId: uuid.optional(), status, reason: z.string().trim().min(5).max(1000) }).strict();
+const query = z.object({ schoolId: uuid.optional(), from: date.optional(), to: date.optional(), academicYearId: uuid.optional(), gradeId: uuid.optional(), sectionId: uuid.optional(), studentId: uuid.optional(), courseOfferingId: uuid.optional(), sessionId: uuid.optional(), page: z.coerce.number().int().min(1).default(1), limit: z.coerce.number().int().min(1).max(100).default(50) }).strict().refine((v) => !v.from || !v.to || v.from <= v.to, { path: ["to"], message: "End date must not precede start date" });
+module.exports = { uuid, schoolRoster, schoolMark, collegeSession, collegeMark, correction, query };

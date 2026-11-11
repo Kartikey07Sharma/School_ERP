@@ -134,6 +134,25 @@ enum CourseRegistrationStatus {
   COMPLETED
 }
 
+enum StudentAttendanceStatus {
+  PRESENT
+  ABSENT
+  LATE
+  LEAVE
+}
+
+enum CollegeAttendanceSessionType {
+  THEORY
+  PRACTICAL
+  LAB
+  OTHER
+}
+
+enum CollegeAttendanceSessionStatus {
+  CONDUCTED
+  CANCELLED
+}
+
 model School {
   id String @id @default(uuid())
 
@@ -174,6 +193,12 @@ model School {
   employeeDepartments      EmployeeDepartment[]
   employeeDesignations     EmployeeDesignation[]
   schoolTeacherAssignments SchoolTeacherAssignment[]
+  schoolAttendances         SchoolStudentAttendance[]
+  collegeAttendanceSessions CollegeAttendanceSession[]
+  collegeAttendances        CollegeStudentAttendance[]
+  attendanceCorrections     StudentAttendanceCorrection[]
+  staffAttendances          StaffAttendance[]
+  staffAttendanceCorrections StaffAttendanceCorrection[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -206,6 +231,14 @@ model User {
   student            Student?
   facultyAssignments FacultyCourseAssignment[]
   employee           Employee?
+  schoolAttendanceMarked  SchoolStudentAttendance[] @relation("SchoolAttendanceMarker")
+  collegeAttendanceMarked CollegeStudentAttendance[] @relation("CollegeAttendanceMarker")
+  collegeSessionsCreated  CollegeAttendanceSession[] @relation("CollegeSessionCreator")
+  attendanceCorrected     StudentAttendanceCorrection[] @relation("AttendanceCorrector")
+  staffAttendanceMarked   StaffAttendance[] @relation("StaffAttendanceMarker")
+  staffCheckInsRecorded   StaffAttendance[] @relation("StaffCheckInRecorder")
+  staffCheckOutsRecorded  StaffAttendance[] @relation("StaffCheckOutRecorder")
+  staffAttendanceCorrected StaffAttendanceCorrection[] @relation("StaffAttendanceCorrector")
 
   authVersion Int @default(0)
 
@@ -226,6 +259,7 @@ model EmployeeDepartment {
   status      EmployeeRecordStatus @default(ACTIVE)
   school      School               @relation(fields: [schoolId], references: [id], onDelete: Restrict)
   employees   Employee[]
+  staffAttendanceSnapshots StaffAttendance[]
   createdAt   DateTime             @default(now())
   updatedAt   DateTime             @updatedAt
 
@@ -245,6 +279,7 @@ model EmployeeDesignation {
   status    EmployeeRecordStatus @default(ACTIVE)
   school    School               @relation(fields: [schoolId], references: [id], onDelete: Restrict)
   employees Employee[]
+  staffAttendanceSnapshots StaffAttendance[]
   createdAt DateTime             @default(now())
   updatedAt DateTime             @updatedAt
 
@@ -286,6 +321,7 @@ model Employee {
   designation                  EmployeeDesignation @relation(fields: [schoolId, designationId], references: [schoolId, id], onDelete: Restrict)
   user                         User?               @relation(fields: [schoolId, userId], references: [schoolId, id], onDelete: Restrict)
   teacherProfile               TeacherProfile?
+  attendances                  StaffAttendance[]
   createdAt                    DateTime            @default(now())
   updatedAt                    DateTime            @updatedAt
 
@@ -348,10 +384,13 @@ model Student {
   portalUser           User?                        @relation(fields: [schoolId, portalUserId], references: [schoolId, id], onDelete: Restrict)
   academicEnrollments  StudentAcademicEnrollment[]
   programmeEnrollments StudentProgrammeEnrollment[]
+  schoolAttendances    SchoolStudentAttendance[]
+  collegeAttendances   CollegeStudentAttendance[]
   createdAt            DateTime                     @default(now())
   updatedAt            DateTime                     @updatedAt
 
   @@unique([schoolId, admissionNumber])
+  @@unique([schoolId, id])
   @@unique([schoolId, portalUserId])
   @@index([schoolId, status])
   @@index([schoolId, className, section, academicYear])
@@ -374,6 +413,7 @@ model AcademicYear {
   semesterEnrollments StudentSemesterEnrollment[]
   courseOfferings     CourseOffering[]
   teacherAssignments  SchoolTeacherAssignment[]
+  schoolAttendances   SchoolStudentAttendance[]
   createdAt           DateTime                    @default(now())
   updatedAt           DateTime                    @updatedAt
 
@@ -420,6 +460,7 @@ model Grade {
   subjectMappings    ClassSubject[]
   enrollments        StudentAcademicEnrollment[]
   teacherAssignments SchoolTeacherAssignment[]
+  schoolAttendances  SchoolStudentAttendance[]
   createdAt          DateTime                    @default(now())
   updatedAt          DateTime                    @updatedAt
 
@@ -445,6 +486,7 @@ model Section {
   academicYear       AcademicYear                @relation(fields: [academicYearId], references: [id], onDelete: Restrict)
   enrollments        StudentAcademicEnrollment[]
   teacherAssignments SchoolTeacherAssignment[]
+  schoolAttendances  SchoolStudentAttendance[]
   createdAt          DateTime                    @default(now())
   updatedAt          DateTime                    @updatedAt
 
@@ -538,9 +580,12 @@ model StudentAcademicEnrollment {
   grade          Grade            @relation(fields: [gradeId], references: [id], onDelete: Restrict)
   section        Section          @relation(fields: [sectionId], references: [id], onDelete: Restrict)
   createdAt      DateTime         @default(now())
+  schoolAttendances SchoolStudentAttendance[]
   updatedAt      DateTime         @updatedAt
 
   @@unique([sectionId, rollNumber])
+  @@unique([schoolId, id])
+  @@unique([schoolId, id, studentId])
   @@index([schoolId, academicYearId, gradeId, sectionId, status])
   @@index([studentId, enrollmentDate])
   @@map("student_academic_enrollments")
@@ -786,10 +831,12 @@ model CourseOffering {
   academicYear       AcademicYear                @relation(fields: [academicYearId], references: [id], onDelete: Restrict)
   registrations      StudentCourseRegistration[]
   facultyAssignments FacultyCourseAssignment[]
+  attendanceSessions CollegeAttendanceSession[]
   createdAt          DateTime                    @default(now())
   updatedAt          DateTime                    @updatedAt
 
   @@unique([academicYearId, programmeTermId, curriculumCourseId, code])
+  @@unique([schoolId, id])
   @@index([schoolId, academicYearId, programmeTermId, status])
   @@map("course_offerings")
 }
@@ -805,10 +852,13 @@ model StudentCourseRegistration {
   school                      School                    @relation(fields: [schoolId], references: [id], onDelete: Restrict)
   semesterEnrollment          StudentSemesterEnrollment @relation(fields: [studentSemesterEnrollmentId], references: [id], onDelete: Restrict)
   courseOffering              CourseOffering            @relation(fields: [courseOfferingId], references: [id], onDelete: Restrict)
+  attendance                  CollegeStudentAttendance[]
   createdAt                   DateTime                  @default(now())
   updatedAt                   DateTime                  @updatedAt
 
   @@unique([studentSemesterEnrollmentId, courseOfferingId])
+  @@unique([schoolId, id])
+  @@unique([schoolId, courseOfferingId, id])
   @@index([schoolId, courseOfferingId, status])
   @@map("student_course_registrations")
 }
@@ -829,4 +879,160 @@ model FacultyCourseAssignment {
   @@unique([courseOfferingId, userId])
   @@index([schoolId, userId, status])
   @@map("faculty_course_assignments")
+}
+
+model SchoolStudentAttendance {
+  id             String                  @id @default(uuid())
+  schoolId       String
+  academicYearId String
+  studentId      String
+  enrollmentId   String
+  gradeId        String
+  sectionId      String
+  attendanceDate DateTime                @db.Date
+  status         StudentAttendanceStatus
+  remarks        String?
+  markedById     String
+  createdAt      DateTime                @default(now())
+  updatedAt      DateTime                @updatedAt
+  school         School                  @relation(fields: [schoolId], references: [id], onDelete: Restrict)
+  academicYear   AcademicYear            @relation(fields: [schoolId, academicYearId], references: [schoolId, id], onDelete: Restrict)
+  student        Student                 @relation(fields: [schoolId, studentId], references: [schoolId, id], onDelete: Restrict)
+  enrollment     StudentAcademicEnrollment @relation(fields: [schoolId, enrollmentId, studentId], references: [schoolId, id, studentId], onDelete: Restrict)
+  grade          Grade                   @relation(fields: [schoolId, gradeId], references: [schoolId, id], onDelete: Restrict)
+  section        Section                 @relation(fields: [schoolId, gradeId, academicYearId, sectionId], references: [schoolId, gradeId, academicYearId, id], onDelete: Restrict)
+  markedBy       User                    @relation("SchoolAttendanceMarker", fields: [markedById], references: [id], onDelete: Restrict)
+  corrections    StudentAttendanceCorrection[]
+
+  @@unique([schoolId, studentId, attendanceDate])
+  @@unique([schoolId, id])
+  @@index([schoolId, academicYearId, gradeId, sectionId, attendanceDate])
+  @@index([schoolId, studentId, attendanceDate])
+  @@map("school_student_attendance")
+}
+
+model CollegeAttendanceSession {
+  id               String                         @id @default(uuid())
+  schoolId         String
+  courseOfferingId String
+  sessionDate      DateTime                       @db.Date
+  startTime        DateTime?                      @db.Time(0)
+  endTime          DateTime?                      @db.Time(0)
+  sessionType      CollegeAttendanceSessionType   @default(THEORY)
+  sessionNumber    Int?
+  remarks          String?
+  status           CollegeAttendanceSessionStatus @default(CONDUCTED)
+  createdById      String
+  createdAt        DateTime                       @default(now())
+  updatedAt        DateTime                       @updatedAt
+  school           School                         @relation(fields: [schoolId], references: [id], onDelete: Restrict)
+  courseOffering   CourseOffering                 @relation(fields: [schoolId, courseOfferingId], references: [schoolId, id], onDelete: Restrict)
+  createdBy        User                           @relation("CollegeSessionCreator", fields: [createdById], references: [id], onDelete: Restrict)
+  attendance       CollegeStudentAttendance[]
+
+  @@unique([schoolId, id])
+  @@unique([schoolId, courseOfferingId, id])
+  @@index([schoolId, courseOfferingId, sessionDate])
+  @@map("college_attendance_sessions")
+}
+
+model CollegeStudentAttendance {
+  id             String                  @id @default(uuid())
+  schoolId       String
+  courseOfferingId String
+  sessionId      String
+  studentId      String
+  registrationId String
+  status         StudentAttendanceStatus
+  remarks        String?
+  markedById     String
+  createdAt      DateTime                @default(now())
+  updatedAt      DateTime                @updatedAt
+  school         School                  @relation(fields: [schoolId], references: [id], onDelete: Restrict)
+  session        CollegeAttendanceSession @relation(fields: [schoolId, courseOfferingId, sessionId], references: [schoolId, courseOfferingId, id], onDelete: Restrict)
+  student        Student                 @relation(fields: [schoolId, studentId], references: [schoolId, id], onDelete: Restrict)
+  registration   StudentCourseRegistration @relation(fields: [schoolId, courseOfferingId, registrationId], references: [schoolId, courseOfferingId, id], onDelete: Restrict)
+  markedBy       User                    @relation("CollegeAttendanceMarker", fields: [markedById], references: [id], onDelete: Restrict)
+  corrections    StudentAttendanceCorrection[]
+
+  @@unique([schoolId, sessionId, studentId])
+  @@unique([schoolId, id])
+  @@index([schoolId, studentId, createdAt])
+  @@map("college_student_attendance")
+}
+
+model StudentAttendanceCorrection {
+  id                       String   @id @default(uuid())
+  schoolId                 String
+  schoolAttendanceId       String?
+  collegeAttendanceId      String?
+  previousStatus           StudentAttendanceStatus
+  newStatus                StudentAttendanceStatus
+  reason                   String
+  correctedById            String
+  correctedAt              DateTime @default(now())
+  school                   School   @relation(fields: [schoolId], references: [id], onDelete: Restrict)
+  schoolAttendance         SchoolStudentAttendance? @relation(fields: [schoolId, schoolAttendanceId], references: [schoolId, id], onDelete: Restrict)
+  collegeAttendance        CollegeStudentAttendance? @relation(fields: [schoolId, collegeAttendanceId], references: [schoolId, id], onDelete: Restrict)
+  correctedBy              User     @relation("AttendanceCorrector", fields: [correctedById], references: [id], onDelete: Restrict)
+
+  @@index([schoolId, schoolAttendanceId, correctedAt])
+  @@index([schoolId, collegeAttendanceId, correctedAt])
+  @@map("student_attendance_corrections")
+}
+
+model StaffAttendance {
+  id                  String                  @id @default(uuid())
+  schoolId            String
+  employeeId          String
+  attendanceDate      DateTime                @db.Date
+  category            EmployeeCategory
+  departmentId        String?
+  designationId       String
+  status              StudentAttendanceStatus
+  checkInAt           DateTime?               @db.Timestamptz(3)
+  checkOutAt          DateTime?               @db.Timestamptz(3)
+  checkInRecordedById String?
+  checkOutRecordedById String?
+  remarks             String?
+  markedById          String
+  createdAt           DateTime                @default(now())
+  updatedAt           DateTime                @updatedAt
+  school              School                  @relation(fields: [schoolId], references: [id], onDelete: Restrict)
+  employee            Employee                @relation(fields: [schoolId, employeeId], references: [schoolId, id], onDelete: Restrict)
+  department          EmployeeDepartment?     @relation(fields: [schoolId, departmentId], references: [schoolId, id], onDelete: Restrict)
+  designation         EmployeeDesignation     @relation(fields: [schoolId, designationId], references: [schoolId, id], onDelete: Restrict)
+  markedBy            User                    @relation("StaffAttendanceMarker", fields: [markedById], references: [id], onDelete: Restrict)
+  checkInRecordedBy   User?                   @relation("StaffCheckInRecorder", fields: [checkInRecordedById], references: [id], onDelete: Restrict)
+  checkOutRecordedBy  User?                   @relation("StaffCheckOutRecorder", fields: [checkOutRecordedById], references: [id], onDelete: Restrict)
+  corrections         StaffAttendanceCorrection[]
+
+  @@unique([schoolId, employeeId, attendanceDate])
+  @@unique([schoolId, id])
+  @@index([schoolId, attendanceDate, status])
+  @@index([schoolId, departmentId, attendanceDate])
+  @@index([schoolId, category, attendanceDate])
+  @@map("staff_attendance")
+}
+
+model StaffAttendanceCorrection {
+  id                    String                  @id @default(uuid())
+  schoolId              String
+  attendanceId          String
+  previousStatus        StudentAttendanceStatus?
+  newStatus             StudentAttendanceStatus?
+  previousCheckInAt     DateTime?               @db.Timestamptz(3)
+  newCheckInAt          DateTime?               @db.Timestamptz(3)
+  previousCheckOutAt    DateTime?               @db.Timestamptz(3)
+  newCheckOutAt         DateTime?               @db.Timestamptz(3)
+  changedFields         String[]
+  reason                String
+  correctedById         String
+  correctedAt           DateTime                @default(now()) @db.Timestamptz(3)
+  school                School                  @relation(fields: [schoolId], references: [id], onDelete: Restrict)
+  attendance            StaffAttendance         @relation(fields: [schoolId, attendanceId], references: [schoolId, id], onDelete: Restrict)
+  correctedBy           User                    @relation("StaffAttendanceCorrector", fields: [correctedById], references: [id], onDelete: Restrict)
+
+  @@index([schoolId, attendanceId, correctedAt])
+  @@map("staff_attendance_corrections")
 }
